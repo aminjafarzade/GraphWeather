@@ -1,0 +1,21 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.venv/
+venv/
+env/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local datasets and generated training artifacts.
+*.nc
+*.nc4
+*.grib
+*.grib2
+*.zarr/
+*.npy
+experiments/**/ckpt.tar
+experiments/**/best_ckpt.tar

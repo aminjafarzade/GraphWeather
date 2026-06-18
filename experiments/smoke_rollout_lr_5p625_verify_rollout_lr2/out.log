@@ -1,0 +1,79 @@
+2026-06-18 19:40:50 | ------------------ Configuration ------------------
+2026-06-18 19:40:50 | Configuration file: /lustre/home/ziya/GNN/GraphWeather5p625/configs/gnn_5p625.yaml
+2026-06-18 19:40:50 | Configuration name: smoke_rollout_lr_5p625
+2026-06-18 19:40:50 | lr 0.0001
+2026-06-18 19:40:50 | weight_decay 0.0001
+2026-06-18 19:40:50 | scheduler CosineAnnealingLR
+2026-06-18 19:40:50 | max_epochs 2
+2026-06-18 19:40:50 | max_train_batches 2
+2026-06-18 19:40:50 | max_valid_batches 2
+2026-06-18 19:40:50 | batch_size 2
+2026-06-18 19:40:50 | num_data_workers 0
+2026-06-18 19:40:50 | enable_amp False
+2026-06-18 19:40:50 | max_gradient_norm 1.0
+2026-06-18 19:40:50 | dt 1
+2026-06-18 19:40:50 | n_history 1
+2026-06-18 19:40:50 | max_rollout_steps 2
+2026-06-18 19:40:50 | rollout_schedule [1, 2]
+2026-06-18 19:40:50 | rollout_stage_epochs [1, 1]
+2026-06-18 19:40:50 | valid_rollout_steps 1
+2026-06-18 19:40:50 | validate_with_train_rollout True
+2026-06-18 19:40:50 | eval_rollout_steps [1, 2]
+2026-06-18 19:40:50 | trainable_scope all
+2026-06-18 19:40:50 | nettype graph_weather
+2026-06-18 19:40:50 | target default
+2026-06-18 19:40:50 | resolution 5.625
+2026-06-18 19:40:50 | graph_path /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625.pt
+2026-06-18 19:40:50 | auto_build_graph True
+2026-06-18 19:40:50 | hidden_dim 32
+2026-06-18 19:40:50 | edge_dim 6
+2026-06-18 19:40:50 | num_heads 4
+2026-06-18 19:40:50 | k_neighbors 8
+2026-06-18 19:40:50 | encoder_blocks 1
+2026-06-18 19:40:50 | decoder_blocks 1
+2026-06-18 19:40:50 | l0_blocks 1
+2026-06-18 19:40:50 | l1_blocks 1
+2026-06-18 19:40:50 | l2_blocks 1
+2026-06-18 19:40:50 | l1_refine_blocks 1
+2026-06-18 19:40:50 | l0_refine_blocks 1
+2026-06-18 19:40:50 | graph_gradient_weight 0.0
+2026-06-18 19:40:50 | lr_schedule_type rollout_stage
+2026-06-18 19:40:50 | lr_by_rollout {1: 0.0001, 2: 7e-05}
+2026-06-18 19:40:50 | warmup_epochs 0
+2026-06-18 19:40:50 | in_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-18 19:40:50 | out_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-18 19:40:50 | normalization zscore
+2026-06-18 19:40:50 | add_grid False
+2026-06-18 19:40:50 | N_grid_channels 0
+2026-06-18 19:40:50 | gridtype sinusoidal
+2026-06-18 19:40:50 | add_noise False
+2026-06-18 19:40:50 | noise_std 0.0
+2026-06-18 19:40:50 | crop_size_x None
+2026-06-18 19:40:50 | crop_size_y None
+2026-06-18 19:40:50 | roll False
+2026-06-18 19:40:50 | orography False
+2026-06-18 19:40:50 | orography_path None
+2026-06-18 19:40:50 | train_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-18 19:40:50 | valid_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/valid
+2026-06-18 19:40:50 | global_means_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+2026-06-18 19:40:50 | global_stds_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+2026-06-18 19:40:50 | exp_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments
+2026-06-18 19:40:50 | save_checkpoint False
+2026-06-18 19:40:50 | resume False
+2026-06-18 19:40:50 | name smoke_rollout_lr_5p625_verify_rollout_lr2
+2026-06-18 19:40:50 | experiment_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments/smoke_rollout_lr_5p625_verify_rollout_lr2
+2026-06-18 19:40:50 | checkpoint_path /lustre/home/ziya/GNN/GraphWeather5p625/experiments/smoke_rollout_lr_5p625_verify_rollout_lr2/ckpt.tar
+2026-06-18 19:40:50 | best_checkpoint_path /lustre/home/ziya/GNN/GraphWeather5p625/experiments/smoke_rollout_lr_5p625_verify_rollout_lr2/best_ckpt.tar
+2026-06-18 19:40:50 | ---------------------------------------------------
+2026-06-18 19:40:50 | Found 39 NetCDF files under /lustre/home/ziya/KAI_5/kai_data_5p625/train. Spatial dims: 32 x 64.
+2026-06-18 19:40:50 | Total valid samples: 14128
+2026-06-18 19:40:50 | Found 1 NetCDF files under /lustre/home/ziya/KAI_5/kai_data_5p625/valid. Spatial dims: 32 x 64.
+2026-06-18 19:40:50 | Total valid samples: 362
+2026-06-18 19:40:52 | Number of trainable model parameters: 109223
+2026-06-18 19:41:01 | Epoch 1 - Batch 0 - Loss 0.404146
+2026-06-18 19:41:10 | Epoch 1 - Batch 1 - Loss 0.414126
+2026-06-18 19:41:26 | Epoch 1 finished in 34.08 sec | train 0.414126 S=1 | valid 0.416982 S=1 | valid_S1 0.416982 valid_S2 0.799196 | lr 1.00e-04
+2026-06-18 19:41:43 | Epoch 2 - Batch 0 - Loss 0.766739
+2026-06-18 19:42:01 | Epoch 2 - Batch 1 - Loss 0.699599
+2026-06-18 19:42:17 | Epoch 2 finished in 50.90 sec | train 0.699599 S=2 | valid 0.732437 S=2 | valid_S1 0.389550 valid_S2 0.732437 | lr 7.00e-05
+2026-06-18 19:42:17 | DONE rank 0

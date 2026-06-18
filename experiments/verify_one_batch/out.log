@@ -1,0 +1,7 @@
+2026-06-18 18:00:07 | Found 39 NetCDF files under /lustre/home/ziya/KAI_5/kai_data_5p625/train. Spatial dims: 32 x 64.
+2026-06-18 18:00:07 | Total valid samples: 14167
+2026-06-18 18:00:07 | Found 1 NetCDF files under /lustre/home/ziya/KAI_5/kai_data_5p625/valid. Spatial dims: 32 x 64.
+2026-06-18 18:00:07 | Total valid samples: 363
+2026-06-18 18:00:11 | Number of trainable model parameters: 109223
+2026-06-18 18:00:20 | Epoch 1 - Batch 0 - Loss 0.374169
+2026-06-18 18:00:23 | Epoch 1 finished in 12.01 sec | train 0.374169 | valid 0.350520 | rollout S=1

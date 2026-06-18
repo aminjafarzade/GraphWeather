@@ -1,0 +1,77 @@
+2026-06-18 18:04:54 | ------------------ Configuration ------------------
+2026-06-18 18:04:54 | Configuration file: /lustre/home/ziya/GNN/GraphWeather5p625/configs/gnn_5p625.yaml
+2026-06-18 18:04:54 | Configuration name: smoke_5p625
+2026-06-18 18:04:54 | lr 0.0001
+2026-06-18 18:04:54 | weight_decay 0.0001
+2026-06-18 18:04:54 | scheduler CosineAnnealingLR
+2026-06-18 18:04:54 | max_epochs 2
+2026-06-18 18:04:54 | max_train_batches 4
+2026-06-18 18:04:54 | max_valid_batches 2
+2026-06-18 18:04:54 | batch_size 2
+2026-06-18 18:04:54 | num_data_workers 0
+2026-06-18 18:04:54 | max_gradient_norm 1.0
+2026-06-18 18:04:54 | dt 1
+2026-06-18 18:04:54 | n_history 1
+2026-06-18 18:04:54 | rollout_schedule [1]
+2026-06-18 18:04:54 | rollout_stage_epochs []
+2026-06-18 18:04:54 | valid_rollout_steps 1
+2026-06-18 18:04:54 | trainable_scope all
+2026-06-18 18:04:54 | nettype graph_weather
+2026-06-18 18:04:54 | target default
+2026-06-18 18:04:54 | resolution 5.625
+2026-06-18 18:04:54 | graph_path /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625.pt
+2026-06-18 18:04:54 | auto_build_graph True
+2026-06-18 18:04:54 | hidden_dim 32
+2026-06-18 18:04:54 | edge_dim 6
+2026-06-18 18:04:54 | num_heads 4
+2026-06-18 18:04:54 | k_neighbors 8
+2026-06-18 18:04:54 | encoder_blocks 1
+2026-06-18 18:04:54 | decoder_blocks 1
+2026-06-18 18:04:54 | l0_blocks 1
+2026-06-18 18:04:54 | l1_blocks 1
+2026-06-18 18:04:54 | l2_blocks 1
+2026-06-18 18:04:54 | l1_refine_blocks 1
+2026-06-18 18:04:54 | l0_refine_blocks 1
+2026-06-18 18:04:54 | graph_gradient_weight 0.0
+2026-06-18 18:04:54 | in_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-18 18:04:54 | out_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-18 18:04:54 | normalization zscore
+2026-06-18 18:04:54 | add_grid False
+2026-06-18 18:04:54 | N_grid_channels 0
+2026-06-18 18:04:54 | gridtype sinusoidal
+2026-06-18 18:04:54 | add_noise False
+2026-06-18 18:04:54 | noise_std 0.0
+2026-06-18 18:04:54 | crop_size_x None
+2026-06-18 18:04:54 | crop_size_y None
+2026-06-18 18:04:54 | roll False
+2026-06-18 18:04:54 | orography False
+2026-06-18 18:04:54 | orography_path None
+2026-06-18 18:04:54 | train_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-18 18:04:54 | valid_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/valid
+2026-06-18 18:04:54 | global_means_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+2026-06-18 18:04:54 | global_stds_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+2026-06-18 18:04:54 | exp_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments
+2026-06-18 18:04:54 | save_checkpoint False
+2026-06-18 18:04:54 | resume False
+2026-06-18 18:04:54 | enable_amp False
+2026-06-18 18:04:54 | name smoke_5p625_smoke01
+2026-06-18 18:04:54 | experiment_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments/smoke_5p625_smoke01
+2026-06-18 18:04:54 | checkpoint_path /lustre/home/ziya/GNN/GraphWeather5p625/experiments/smoke_5p625_smoke01/ckpt.tar
+2026-06-18 18:04:54 | best_checkpoint_path /lustre/home/ziya/GNN/GraphWeather5p625/experiments/smoke_5p625_smoke01/best_ckpt.tar
+2026-06-18 18:04:54 | ---------------------------------------------------
+2026-06-18 18:04:54 | Found 39 NetCDF files under /lustre/home/ziya/KAI_5/kai_data_5p625/train. Spatial dims: 32 x 64.
+2026-06-18 18:04:54 | Total valid samples: 14167
+2026-06-18 18:04:54 | Found 1 NetCDF files under /lustre/home/ziya/KAI_5/kai_data_5p625/valid. Spatial dims: 32 x 64.
+2026-06-18 18:04:54 | Total valid samples: 363
+2026-06-18 18:04:55 | Number of trainable model parameters: 109223
+2026-06-18 18:04:59 | Epoch 1 - Batch 0 - Loss 0.409680
+2026-06-18 18:05:00 | Epoch 1 - Batch 1 - Loss 0.429647
+2026-06-18 18:05:00 | Epoch 1 - Batch 2 - Loss 0.405383
+2026-06-18 18:05:00 | Epoch 1 - Batch 3 - Loss 0.382198
+2026-06-18 18:05:00 | Epoch 1 finished in 4.94 sec | train 0.382198 | valid 0.377822 | rollout S=1
+2026-06-18 18:05:00 | Epoch 2 - Batch 0 - Loss 0.370327
+2026-06-18 18:05:01 | Epoch 2 - Batch 1 - Loss 0.332485
+2026-06-18 18:05:01 | Epoch 2 - Batch 2 - Loss 0.325105
+2026-06-18 18:05:01 | Epoch 2 - Batch 3 - Loss 0.325369
+2026-06-18 18:05:01 | Epoch 2 finished in 1.18 sec | train 0.325369 | valid 0.346468 | rollout S=1
+2026-06-18 18:05:01 | DONE rank 0
