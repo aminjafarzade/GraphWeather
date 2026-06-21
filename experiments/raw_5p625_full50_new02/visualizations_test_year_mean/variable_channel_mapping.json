@@ -1,0 +1,73 @@
+{
+  "channel_source": "NetCDF channel variable: /lustre/home/ziya/KAI_5/kai_data_5p625/test/2020.nc",
+  "variables": {
+    "z500": {
+      "requested_variable": "z500",
+      "channel": 6,
+      "local_idx": 6,
+      "actual_name": "z500",
+      "canonical_name": "z500",
+      "unit": "m^2 s^-2",
+      "resolution_source": "metadata channel name/alias",
+      "normalization_mean_source": "mean: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_source": "std: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_channel_index": 6,
+      "normalization_std_channel_index": 6,
+      "normalization_mean": 54124.0078125,
+      "normalization_std": 3340.828369140625
+    },
+    "t2m": {
+      "requested_variable": "t2m",
+      "channel": 60,
+      "local_idx": 60,
+      "actual_name": "t2m",
+      "canonical_name": "t2m",
+      "unit": "K",
+      "resolution_source": "metadata channel name/alias",
+      "normalization_mean_source": "mean: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_source": "std: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_channel_index": 60,
+      "normalization_std_channel_index": 60,
+      "normalization_mean": 278.5900573730469,
+      "normalization_std": 20.952444076538086
+    },
+    "t850": {
+      "requested_variable": "t850",
+      "channel": 33,
+      "local_idx": 33,
+      "actual_name": "t850",
+      "canonical_name": "t850",
+      "unit": "K",
+      "resolution_source": "metadata channel name/alias",
+      "normalization_mean_source": "mean: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_source": "std: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_channel_index": 33,
+      "normalization_std_channel_index": 33,
+      "normalization_mean": 274.62408447265625,
+      "normalization_std": 15.436326026916504
+    },
+    "msl": {
+      "requested_variable": "msl",
+      "channel": 64,
+      "local_idx": 64,
+      "actual_name": "msl",
+      "canonical_name": "msl",
+      "unit": "Pa",
+      "resolution_source": "metadata channel name/alias",
+      "normalization_mean_source": "mean: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_source": "std: output-channel stats from /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy",
+      "normalization_std_path": "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy",
+      "normalization_mean_channel_index": 64,
+      "normalization_std_channel_index": 64,
+      "normalization_mean": 100953.8125,
+      "normalization_std": 1298.0
+    }
+  }
+}

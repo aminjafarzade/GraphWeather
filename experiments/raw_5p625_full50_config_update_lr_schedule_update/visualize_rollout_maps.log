@@ -1,0 +1,110 @@
+2026-06-19 01:58:52 | ------------------ Configuration ------------------
+2026-06-19 01:58:52 | Configuration file: configs/gnn_5p625.yaml
+2026-06-19 01:58:52 | Configuration name: raw_5p625
+2026-06-19 01:58:52 | lr 0.0001
+2026-06-19 01:58:52 | weight_decay 0.0001
+2026-06-19 01:58:52 | scheduler CosineAnnealingLR
+2026-06-19 01:58:52 | max_epochs 150
+2026-06-19 01:58:52 | max_train_batches None
+2026-06-19 01:58:52 | max_valid_batches None
+2026-06-19 01:58:52 | batch_size 12
+2026-06-19 01:58:52 | num_data_workers 4
+2026-06-19 01:58:52 | enable_amp True
+2026-06-19 01:58:52 | max_gradient_norm 1.0
+2026-06-19 01:58:52 | dt 1
+2026-06-19 01:58:52 | n_history 1
+2026-06-19 01:58:52 | max_rollout_steps 10
+2026-06-19 01:58:52 | rollout_schedule [1, 2, 4, 6, 8, 10]
+2026-06-19 01:58:52 | rollout_stage_epochs [5, 5, 10, 10, 10, 10]
+2026-06-19 01:58:52 | valid_rollout_steps 1
+2026-06-19 01:58:52 | validate_with_train_rollout True
+2026-06-19 01:58:52 | eval_rollout_steps [1, 2, 4, 6, 8, 10]
+2026-06-19 01:58:52 | trainable_scope all
+2026-06-19 01:58:52 | checkpoint_metric valid_S10
+2026-06-19 01:58:52 | checkpoint_mode min
+2026-06-19 01:58:52 | stage_checkpoint_metric_mode stage_horizon
+2026-06-19 01:58:52 | nettype graph_weather
+2026-06-19 01:58:52 | target default
+2026-06-19 01:58:52 | resolution 5.625
+2026-06-19 01:58:52 | graph_path /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625.pt
+2026-06-19 01:58:52 | auto_build_graph True
+2026-06-19 01:58:52 | hidden_dim 96
+2026-06-19 01:58:52 | edge_dim 6
+2026-06-19 01:58:52 | num_heads 4
+2026-06-19 01:58:52 | k_neighbors 8
+2026-06-19 01:58:52 | encoder_blocks 1
+2026-06-19 01:58:52 | decoder_blocks 1
+2026-06-19 01:58:52 | l0_blocks 2
+2026-06-19 01:58:52 | l1_blocks 2
+2026-06-19 01:58:52 | l2_blocks 1
+2026-06-19 01:58:52 | l1_refine_blocks 1
+2026-06-19 01:58:52 | l0_refine_blocks 1
+2026-06-19 01:58:52 | graph_gradient_weight 0.0
+2026-06-19 01:58:52 | lr_schedule_type rollout_stage
+2026-06-19 01:58:52 | lr_by_rollout {1: 0.0001, 2: 0.0001, 4: 7e-05, 6: 6e-05, 8: 5e-05, 10: 3e-05}
+2026-06-19 01:58:52 | warmup_epochs 1
+2026-06-19 01:58:52 | in_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 01:58:52 | out_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 01:58:52 | normalization zscore
+2026-06-19 01:58:52 | add_grid False
+2026-06-19 01:58:52 | N_grid_channels 0
+2026-06-19 01:58:52 | gridtype sinusoidal
+2026-06-19 01:58:52 | add_noise False
+2026-06-19 01:58:52 | noise_std 0.0
+2026-06-19 01:58:52 | crop_size_x None
+2026-06-19 01:58:52 | crop_size_y None
+2026-06-19 01:58:52 | roll False
+2026-06-19 01:58:52 | orography False
+2026-06-19 01:58:52 | orography_path None
+2026-06-19 01:58:52 | train_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-19 01:58:52 | valid_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/valid
+2026-06-19 01:58:52 | test_dataset_path /lustre/home/ziya/KAI_5/kai_data_5p625/test
+2026-06-19 01:58:52 | global_means_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+2026-06-19 01:58:52 | global_stds_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+2026-06-19 01:58:52 | exp_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments
+2026-06-19 01:58:52 | eval_checkpoint_path None
+2026-06-19 01:58:52 | eval_output_dir None
+2026-06-19 01:58:52 | eval_forecast_steps [10]
+2026-06-19 01:58:52 | eval_fixed_rollout_steps 10
+2026-06-19 01:58:52 | eval_compare_stage_checkpoints False
+2026-06-19 01:58:52 | eval_stage_checkpoints {1: 'best_ckpt_S1.tar', 2: 'best_ckpt_S2.tar', 4: 'best_ckpt_S4.tar', 6: 'best_ckpt_S6.tar', 8: 'best_ckpt_S8.tar', 10: 'best_ckpt_S10.tar'}
+2026-06-19 01:58:52 | eval_global_best_checkpoint best_ckpt.tar
+2026-06-19 01:58:52 | eval_start_timestep 1
+2026-06-19 01:58:52 | eval_ic_stride 1
+2026-06-19 01:58:52 | n_initial_conditions 5
+2026-06-19 01:58:52 | climatology_path None
+2026-06-19 01:58:52 | compute_climatology True
+2026-06-19 01:58:52 | eval_device cuda
+2026-06-19 01:58:52 | eval_plot_variables []
+2026-06-19 01:58:52 | eval_plot_format png
+2026-06-19 01:58:52 | plot_persistence True
+2026-06-19 01:58:52 | save_checkpoint True
+2026-06-19 01:58:52 | resume True
+2026-06-19 01:58:52 | ---------------------------------------------------
+2026-06-19 01:58:53 | Using device: cuda
+2026-06-19 01:58:53 | Resolved variable msl -> channel 64 -> actual name msl -> unit Pa
+2026-06-19 01:58:53 | Resolved variable t2m -> channel 60 -> actual name t2m -> unit K
+2026-06-19 01:58:53 | Resolved variable t850 -> channel 33 -> actual name t850 -> unit K
+2026-06-19 01:58:53 | Resolved variable z500 -> channel 6 -> actual name z500 -> unit m^2 s^-2
+2026-06-19 01:58:53 | Saved JSON: experiments/raw_5p625_full50_config_update_lr_schedule_update/variable_channel_mapping.json
+2026-06-19 01:58:54 | Loaded checkpoint: experiments/raw_5p625_full50_config_update_lr_schedule_update/best_ckpt_S8.tar | epoch=33 | train_rollout_steps=8
+2026-06-19 01:59:03 | Aggregated 25/354 samples for year_mean visualization
+2026-06-19 01:59:11 | Aggregated 50/354 samples for year_mean visualization
+2026-06-19 01:59:19 | Aggregated 75/354 samples for year_mean visualization
+2026-06-19 01:59:27 | Aggregated 100/354 samples for year_mean visualization
+2026-06-19 01:59:36 | Aggregated 125/354 samples for year_mean visualization
+2026-06-19 01:59:44 | Aggregated 150/354 samples for year_mean visualization
+2026-06-19 01:59:52 | Aggregated 175/354 samples for year_mean visualization
+2026-06-19 02:00:01 | Aggregated 200/354 samples for year_mean visualization
+2026-06-19 02:00:09 | Aggregated 225/354 samples for year_mean visualization
+2026-06-19 02:00:17 | Aggregated 250/354 samples for year_mean visualization
+2026-06-19 02:00:26 | Aggregated 275/354 samples for year_mean visualization
+2026-06-19 02:00:34 | Aggregated 300/354 samples for year_mean visualization
+2026-06-19 02:00:42 | Aggregated 325/354 samples for year_mean visualization
+2026-06-19 02:00:50 | Aggregated 350/354 samples for year_mean visualization
+2026-06-19 02:00:52 | Aggregated 354/354 samples for year_mean visualization
+2026-06-19 02:00:53 | Saved rollout map figure: experiments/raw_5p625_full50_config_update_lr_schedule_update/yearmean_msl_rollout_maps.png
+2026-06-19 02:00:54 | Saved rollout map figure: experiments/raw_5p625_full50_config_update_lr_schedule_update/yearmean_t2m_rollout_maps.png
+2026-06-19 02:00:55 | Saved rollout map figure: experiments/raw_5p625_full50_config_update_lr_schedule_update/yearmean_t850_rollout_maps.png
+2026-06-19 02:00:56 | Saved rollout map figure: experiments/raw_5p625_full50_config_update_lr_schedule_update/yearmean_z500_rollout_maps.png
+2026-06-19 02:00:56 | Saved JSON: experiments/raw_5p625_full50_config_update_lr_schedule_update/visualization_metadata.json

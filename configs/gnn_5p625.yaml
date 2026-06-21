@@ -16,12 +16,15 @@ default: &DEFAULT
   dt: 1
   n_history: 1
   max_rollout_steps: 10
-  rollout_schedule: [1, 2, 4, 8, 10]
-  rollout_stage_epochs: [5, 5, 10, 10, 10]
+  rollout_schedule: [1, 2, 4, 6, 8, 10]
+  rollout_stage_epochs: [5, 5, 10, 10, 10, 10]
   valid_rollout_steps: 1
   validate_with_train_rollout: true
-  eval_rollout_steps: [1, 2, 4, 8, 10]
+  eval_rollout_steps: [1, 2, 4, 6, 8, 10]
   trainable_scope: "all"
+  checkpoint_metric: "valid_S10"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "stage_horizon"
 
   nettype: "graph_weather"
   target: "default"
@@ -47,6 +50,7 @@ default: &DEFAULT
     1: 1.0e-4
     2: 1.0e-4
     4: 7.0e-5
+    6: 6.0e-5
     8: 5.0e-5
     10: 3.0e-5
   warmup_epochs: 1
@@ -74,9 +78,35 @@ default: &DEFAULT
 
   train_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/train"
   valid_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/valid"
+  test_dataset_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/test"
   global_means_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy"
   global_stds_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy"
   exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
+
+  # Standalone evaluation. Override eval_checkpoint_path from the CLI unless
+  # you want to hard-code a specific checkpoint here.
+  eval_checkpoint_path: null
+  eval_output_dir: null
+  eval_forecast_steps: [10]
+  eval_fixed_rollout_steps: 10
+  eval_compare_stage_checkpoints: false
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+    4: "best_ckpt_S4.tar"
+    6: "best_ckpt_S6.tar"
+    8: "best_ckpt_S8.tar"
+    10: "best_ckpt_S10.tar"
+  eval_global_best_checkpoint: "best_ckpt.tar"
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  n_initial_conditions: 5
+  climatology_path: null
+  compute_climatology: true
+  eval_device: "cuda"
+  eval_plot_variables: []
+  eval_plot_format: "png"
+  plot_persistence: true
 
   save_checkpoint: true
   resume: true
@@ -90,11 +120,11 @@ raw_5p625:
   hidden_dim: 96
   num_heads: 4
   max_rollout_steps: 10
-  rollout_schedule: [1, 2, 4, 8, 10]
-  rollout_stage_epochs: [5, 5, 10, 10, 10]
+  rollout_schedule: [1, 2, 4, 6, 8, 10]
+  rollout_stage_epochs: [5, 5, 10, 10, 10, 10]
   valid_rollout_steps: 1
   validate_with_train_rollout: true
-  eval_rollout_steps: [1, 2, 4, 8, 10]
+  eval_rollout_steps: [1, 2, 4, 6, 8, 10]
   save_checkpoint: true
   resume: true
 
@@ -172,6 +202,9 @@ smoke_rollout_lr_5p625:
   valid_rollout_steps: 1
   validate_with_train_rollout: true
   eval_rollout_steps: [1, 2]
+  checkpoint_metric: "valid_S2"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "stage_horizon"
   lr_schedule_type: "rollout_stage"
   lr_by_rollout:
     1: 1.0e-4
@@ -179,4 +212,75 @@ smoke_rollout_lr_5p625:
   warmup_epochs: 0
   trainable_scope: "all"
   save_checkpoint: false
+  resume: false
+
+eval_smoke_5p625:
+  <<: *DEFAULT
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  max_rollout_steps: 2
+  rollout_schedule: [1, 2]
+  rollout_stage_epochs: [1, 1]
+  eval_rollout_steps: [1, 2]
+  eval_forecast_steps: [2]
+  eval_fixed_rollout_steps: 2
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+  eval_global_best_checkpoint: "best_ckpt.tar"
+  n_initial_conditions: 1
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  eval_device: "cpu"
+  eval_plot_variables: ["t2m"]
+  plot_persistence: true
+  save_checkpoint: false
+  resume: false
+
+smoke_stage_ckpt_5p625:
+  <<: *DEFAULT
+  max_epochs: 3
+  max_train_batches: 2
+  max_valid_batches: 2
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  max_rollout_steps: 2
+  rollout_schedule: [1, 2]
+  rollout_stage_epochs: [1, 2]
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1, 2]
+  checkpoint_metric: "valid_S2"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "stage_horizon"
+  eval_fixed_rollout_steps: 2
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+  eval_forecast_steps: [2]
+  n_initial_conditions: 1
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  eval_device: "cpu"
+  eval_plot_variables: ["t2m"]
+  plot_persistence: true
+  save_checkpoint: true
   resume: false

@@ -3,3 +3,5 @@ numpy>=1.23
 PyYAML>=6.0
 netCDF4>=1.6
 tqdm>=4.66
+matplotlib>=3.7
+cartopy>=0.22

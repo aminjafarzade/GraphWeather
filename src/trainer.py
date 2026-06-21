@@ -31,12 +31,38 @@ def _get(params: Any, name: str, default: Any) -> Any:
     return getattr(params, name, default)
 
 
+def _resolve_device(device_name: Any, local_rank: int) -> torch.device:
+    requested = str(device_name or "auto").strip().lower()
+    if requested in {"", "auto"}:
+        requested = f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu"
+    elif requested.isdigit():
+        requested = f"cuda:{requested}"
+    elif requested == "cuda":
+        requested = f"cuda:{local_rank}"
+
+    device = torch.device(requested)
+    if device.type != "cuda":
+        return device
+    if not torch.cuda.is_available():
+        raise ValueError(f"Requested training device '{requested}', but CUDA is not available.")
+    device_count = torch.cuda.device_count()
+    if device.index is not None and device.index >= device_count:
+        raise ValueError(
+            f"Requested training device '{requested}', but only {device_count} CUDA device(s) are visible."
+        )
+    return device
+
+
 class Trainer:
     def __init__(self, params: Any, world_rank: int = 0, local_rank: int = 0):
         self.params = params
         self.world_rank = int(world_rank)
         self.local_rank = int(local_rank)
-        self.device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+        self.device = _resolve_device(_get(params, "device", "auto"), self.local_rank)
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
+            torch.backends.cudnn.benchmark = True
+        logging.info("Training device: %s", self.device)
         self.max_gradient_norm = float(_get(params, "max_gradient_norm", 1.0))
         self.iters = 0
         self.epoch = 0
@@ -51,6 +77,14 @@ class Trainer:
         self.rollout_stage_epochs = list(_get(params, "rollout_stage_epochs", []))
         self.lr_schedule_type = str(_get(params, "lr_schedule_type", "none")).lower()
         self.warmup_epochs = int(_get(params, "warmup_epochs", 0))
+        self.checkpoint_metric = str(_get(params, "checkpoint_metric", "valid_loss"))
+        self.checkpoint_mode = str(_get(params, "checkpoint_mode", "min")).lower()
+        self.stage_checkpoint_metric_mode = str(_get(params, "stage_checkpoint_metric_mode", "stage_horizon")).lower()
+        self.best_score_global = float("inf") if self.checkpoint_mode == "min" else -float("inf")
+        self.best_score_by_stage = {
+            int(stage): (float("inf") if self.checkpoint_mode == "min" else -float("inf"))
+            for stage in sorted(set(self.rollout_schedule))
+        }
         self._last_epoch_metadata: dict[str, Any] = {}
 
         data_cfg = DataConfig(
@@ -262,8 +296,29 @@ class Trainer:
             last_pred = pred
         return total / rollout_steps, last_pred
 
+    def _metric_value(self, logs: dict[str, float], metric_name: str) -> float:
+        if metric_name in logs:
+            return float(logs[metric_name])
+        logging.warning("Metric '%s' missing from validation logs. Falling back to valid_loss.", metric_name)
+        return float(logs["valid_loss"])
+
+    def _is_better(self, score: float, best_score: float) -> bool:
+        if self.checkpoint_mode == "max":
+            return score > best_score
+        return score < best_score
+
+    def _stage_checkpoint_metric_name(self, stage: int) -> str:
+        if self.stage_checkpoint_metric_mode == "final_horizon":
+            return f"valid_S{self.max_rollout_steps}"
+        if self.stage_checkpoint_metric_mode == "stage_horizon":
+            return f"valid_S{stage}"
+        return f"valid_S{stage}"
+
+    def _stage_checkpoint_path(self, stage: int) -> str:
+        experiment_dir = str(_get(self.params, "experiment_dir", os.path.dirname(self.params.best_checkpoint_path)))
+        return os.path.join(experiment_dir, f"best_ckpt_S{int(stage)}.tar")
+
     def train(self) -> None:
-        best_valid_loss = float("inf")
         for epoch in range(self.start_epoch, int(self.params.max_epochs)):
             start = time.time()
             train_rollout_steps = self._rollout_steps_for_epoch()
@@ -292,6 +347,10 @@ class Trainer:
                 for key, value in valid_logs.items()
                 if key.startswith("valid_S")
             }
+            global_metric_name = self.checkpoint_metric
+            global_metric_value = self._metric_value(valid_logs, global_metric_name)
+            stage_metric_name = self._stage_checkpoint_metric_name(train_rollout_steps)
+            stage_metric_value = self._metric_value(valid_logs, stage_metric_name)
             self._last_epoch_metadata = {
                 "epoch": self.epoch,
                 "train_loss": train_logs["loss"],
@@ -299,14 +358,44 @@ class Trainer:
                 "train_rollout_steps": train_rollout_steps,
                 "valid_rollout_steps": int(valid_logs["valid_rollout_steps"]),
                 "lr": epoch_lr,
+                "checkpoint_metric": global_metric_name,
+                "checkpoint_metric_value": global_metric_value,
+                "stage_checkpoint_metric": stage_metric_name,
+                "stage_checkpoint_metric_value": stage_metric_value,
                 "valid_multi_horizon": valid_multi,
+                "persistence_metrics": {},
             }
 
             if bool(_get(self.params, "save_checkpoint", True)):
+                last_checkpoint_path = str(_get(self.params, "last_checkpoint_path", ""))
+                if last_checkpoint_path:
+                    self.save_checkpoint(last_checkpoint_path)
                 self.save_checkpoint(self.params.checkpoint_path)
-                if valid_logs["valid_loss"] <= best_valid_loss:
+                if self._is_better(global_metric_value, self.best_score_global):
+                    self.best_score_global = global_metric_value
                     self.save_checkpoint(self.params.best_checkpoint_path)
-                    best_valid_loss = valid_logs["valid_loss"]
+                    logging.info(
+                        "New global best checkpoint saved: %s using %s=%.6f",
+                        self.params.best_checkpoint_path,
+                        global_metric_name,
+                        global_metric_value,
+                    )
+
+                current_stage_best = self.best_score_by_stage.get(
+                    train_rollout_steps,
+                    float("inf") if self.checkpoint_mode == "min" else -float("inf"),
+                )
+                if self._is_better(stage_metric_value, current_stage_best):
+                    self.best_score_by_stage[train_rollout_steps] = stage_metric_value
+                    stage_path = self._stage_checkpoint_path(train_rollout_steps)
+                    self.save_checkpoint(stage_path)
+                    logging.info(
+                        "New best S=%d checkpoint saved: %s using %s=%.6f",
+                        train_rollout_steps,
+                        os.path.basename(stage_path),
+                        stage_metric_name,
+                        stage_metric_value,
+                    )
             extra_valid = " ".join(
                 f"{key} {value:.6f}"
                 for key, value in sorted(valid_logs.items())
@@ -355,10 +444,11 @@ class Trainer:
         return time.time() - start, {"loss": last_loss, "rollout_steps": float(rollout_steps)}
 
     @torch.no_grad()
-    def validate_rollout_horizon(self, rollout_steps: int) -> float:
+    def validate_rollout_horizon(self, rollout_steps: int) -> tuple[float, float]:
         self.model.eval()
         rollout_steps = min(int(rollout_steps), self.max_rollout_steps)
         total = 0.0
+        final_total = 0.0
         steps = 0
         for batch_idx, data in enumerate(self.valid_data_loader):
             if self.max_valid_batches is not None and batch_idx >= self.max_valid_batches:
@@ -366,8 +456,21 @@ class Trainer:
             inp, target = [x.to(self.device, dtype=torch.float32) for x in data]
             loss, _ = self._rollout_loss(inp, target, rollout_steps)
             total += float(loss.item())
+            target_seq = self._target_sequence(target)
+            final_step = min(rollout_steps, target_seq.shape[1]) - 1
+            previous, current = self.model.adapter.extract_two_steps(inp)
+            final_pred = None
+            with torch.no_grad():
+                for _ in range(final_step + 1):
+                    final_pred = self.model.forward_steps(previous, current)
+                    next_step = current.clone()
+                    next_step[:, : self.model.output_channels] = final_pred
+                    previous, current = current, next_step
+            final_loss = self.loss_obj(final_pred, target_seq[:, final_step])
+            final_total += float(final_loss.item())
             steps += 1
-        return total / max(steps, 1)
+        denom = max(steps, 1)
+        return total / denom, final_total / denom
 
     @torch.no_grad()
     def validate_one_epoch(self, rollout_steps: int | None = None) -> tuple[float, dict[str, float]]:
@@ -381,9 +484,10 @@ class Trainer:
             rollout_steps = min(int(rollout_steps), self.max_rollout_steps)
 
         start = time.time()
-        valid_loss = self.validate_rollout_horizon(rollout_steps)
+        valid_loss, valid_final_loss = self.validate_rollout_horizon(rollout_steps)
         logs: dict[str, float] = {
             "valid_loss": valid_loss,
+            "valid_final_loss": valid_final_loss,
             "valid_rollout_steps": float(rollout_steps),
         }
 
@@ -397,13 +501,17 @@ class Trainer:
                 continue
             if horizon == rollout_steps:
                 logs[key] = valid_loss
+                logs[f"{key}_final"] = valid_final_loss
             else:
-                logs[key] = self.validate_rollout_horizon(horizon)
+                horizon_loss, horizon_final_loss = self.validate_rollout_horizon(horizon)
+                logs[key] = horizon_loss
+                logs[f"{key}_final"] = horizon_final_loss
 
         return time.time() - start, logs
 
-    def save_checkpoint(self, checkpoint_path: str) -> None:
+    def save_checkpoint(self, checkpoint_path: str, metadata: dict[str, Any] | None = None) -> None:
         os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+        metadata = dict(self._last_epoch_metadata if metadata is None else metadata)
         torch.save(
             {
                 "iters": self.iters,
@@ -411,7 +519,9 @@ class Trainer:
                 "model_state": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "params": dict(getattr(self.params, "params", {})),
-                "metadata": dict(self._last_epoch_metadata),
+                "metadata": metadata,
+                "best_score_global": self.best_score_global,
+                "best_score_by_stage": dict(self.best_score_by_stage),
             },
             checkpoint_path,
         )
@@ -424,4 +534,9 @@ class Trainer:
         self.iters = int(checkpoint.get("iters", 0))
         self.start_epoch = int(checkpoint.get("epoch", 0))
         self.epoch = self.start_epoch
+        self.best_score_global = float(checkpoint.get("best_score_global", self.best_score_global))
+        restored_by_stage = checkpoint.get("best_score_by_stage", None)
+        if isinstance(restored_by_stage, dict):
+            for key, value in restored_by_stage.items():
+                self.best_score_by_stage[int(key)] = float(value)
         logging.info("Restored checkpoint %s", checkpoint_path)

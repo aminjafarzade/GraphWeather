@@ -19,3 +19,5 @@ env/
 *.npy
 experiments/**/ckpt.tar
 experiments/**/best_ckpt.tar
+experiments/**/last_ckpt.tar
+experiments/**/best_ckpt_*.tar

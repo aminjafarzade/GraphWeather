@@ -1,0 +1,279 @@
+2026-06-19 00:12:42 | ------------------ Configuration ------------------
+2026-06-19 00:12:42 | Configuration file: /lustre/home/ziya/GNN/GraphWeather5p625/configs/gnn_5p625.yaml
+2026-06-19 00:12:42 | Configuration name: raw_5p625
+2026-06-19 00:12:42 | lr 0.0001
+2026-06-19 00:12:42 | weight_decay 0.0001
+2026-06-19 00:12:42 | scheduler CosineAnnealingLR
+2026-06-19 00:12:42 | max_epochs 150
+2026-06-19 00:12:42 | max_train_batches None
+2026-06-19 00:12:42 | max_valid_batches None
+2026-06-19 00:12:42 | batch_size 12
+2026-06-19 00:12:42 | num_data_workers 4
+2026-06-19 00:12:42 | enable_amp True
+2026-06-19 00:12:42 | max_gradient_norm 1.0
+2026-06-19 00:12:42 | dt 1
+2026-06-19 00:12:42 | n_history 1
+2026-06-19 00:12:42 | max_rollout_steps 10
+2026-06-19 00:12:42 | rollout_schedule [1, 2, 4, 6, 8, 10]
+2026-06-19 00:12:42 | rollout_stage_epochs [5, 5, 10, 10, 10, 10]
+2026-06-19 00:12:42 | valid_rollout_steps 1
+2026-06-19 00:12:42 | validate_with_train_rollout True
+2026-06-19 00:12:42 | eval_rollout_steps [1, 2, 4, 6, 8, 10]
+2026-06-19 00:12:42 | trainable_scope all
+2026-06-19 00:12:42 | checkpoint_metric valid_S10
+2026-06-19 00:12:42 | checkpoint_mode min
+2026-06-19 00:12:42 | stage_checkpoint_metric_mode stage_horizon
+2026-06-19 00:12:42 | nettype graph_weather
+2026-06-19 00:12:42 | target default
+2026-06-19 00:12:42 | resolution 5.625
+2026-06-19 00:12:42 | graph_path /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625.pt
+2026-06-19 00:12:42 | auto_build_graph True
+2026-06-19 00:12:42 | hidden_dim 96
+2026-06-19 00:12:42 | edge_dim 6
+2026-06-19 00:12:42 | num_heads 4
+2026-06-19 00:12:42 | k_neighbors 8
+2026-06-19 00:12:42 | encoder_blocks 1
+2026-06-19 00:12:42 | decoder_blocks 1
+2026-06-19 00:12:42 | l0_blocks 2
+2026-06-19 00:12:42 | l1_blocks 2
+2026-06-19 00:12:42 | l2_blocks 1
+2026-06-19 00:12:42 | l1_refine_blocks 1
+2026-06-19 00:12:42 | l0_refine_blocks 1
+2026-06-19 00:12:42 | graph_gradient_weight 0.0
+2026-06-19 00:12:42 | lr_schedule_type rollout_stage
+2026-06-19 00:12:42 | lr_by_rollout {1: 0.0001, 2: 0.0001, 4: 7e-05, 6: 6e-05, 8: 5e-05, 10: 3e-05}
+2026-06-19 00:12:42 | warmup_epochs 1
+2026-06-19 00:12:42 | in_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 00:12:42 | out_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 00:12:42 | normalization zscore
+2026-06-19 00:12:42 | add_grid False
+2026-06-19 00:12:42 | N_grid_channels 0
+2026-06-19 00:12:42 | gridtype sinusoidal
+2026-06-19 00:12:42 | add_noise False
+2026-06-19 00:12:42 | noise_std 0.0
+2026-06-19 00:12:42 | crop_size_x None
+2026-06-19 00:12:42 | crop_size_y None
+2026-06-19 00:12:42 | roll False
+2026-06-19 00:12:42 | orography False
+2026-06-19 00:12:42 | orography_path None
+2026-06-19 00:12:42 | train_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-19 00:12:42 | valid_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/valid
+2026-06-19 00:12:42 | test_dataset_path /lustre/home/ziya/KAI_5/kai_data_5p625/test
+2026-06-19 00:12:42 | global_means_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+2026-06-19 00:12:42 | global_stds_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+2026-06-19 00:12:42 | exp_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments
+2026-06-19 00:12:42 | eval_checkpoint_path experiments/raw_5p625_full150/best_ckpt_S6.tar
+2026-06-19 00:12:42 | eval_output_dir None
+2026-06-19 00:12:42 | eval_forecast_steps [10]
+2026-06-19 00:12:42 | eval_fixed_rollout_steps 10
+2026-06-19 00:12:42 | eval_compare_stage_checkpoints False
+2026-06-19 00:12:42 | eval_stage_checkpoints {1: 'best_ckpt_S1.tar', 2: 'best_ckpt_S2.tar', 4: 'best_ckpt_S4.tar', 6: 'best_ckpt_S6.tar', 8: 'best_ckpt_S8.tar', 10: 'best_ckpt_S10.tar'}
+2026-06-19 00:12:42 | eval_global_best_checkpoint best_ckpt.tar
+2026-06-19 00:12:42 | eval_start_timestep 1
+2026-06-19 00:12:42 | eval_ic_stride 1
+2026-06-19 00:12:42 | n_initial_conditions 5
+2026-06-19 00:12:42 | climatology_path None
+2026-06-19 00:12:42 | compute_climatology True
+2026-06-19 00:12:42 | eval_device cuda
+2026-06-19 00:12:42 | eval_plot_variables ['msl', 't2m', 'z500', 't850']
+2026-06-19 00:12:42 | eval_plot_format png
+2026-06-19 00:12:42 | plot_persistence True
+2026-06-19 00:12:42 | save_checkpoint True
+2026-06-19 00:12:42 | resume True
+2026-06-19 00:12:42 | ---------------------------------------------------
+2026-06-19 00:13:08 | ------------------ Configuration ------------------
+2026-06-19 00:13:08 | Configuration file: /lustre/home/ziya/GNN/GraphWeather5p625/configs/gnn_5p625.yaml
+2026-06-19 00:13:08 | Configuration name: raw_5p625
+2026-06-19 00:13:08 | lr 0.0001
+2026-06-19 00:13:08 | weight_decay 0.0001
+2026-06-19 00:13:08 | scheduler CosineAnnealingLR
+2026-06-19 00:13:08 | max_epochs 150
+2026-06-19 00:13:08 | max_train_batches None
+2026-06-19 00:13:08 | max_valid_batches None
+2026-06-19 00:13:08 | batch_size 12
+2026-06-19 00:13:08 | num_data_workers 4
+2026-06-19 00:13:08 | enable_amp True
+2026-06-19 00:13:08 | max_gradient_norm 1.0
+2026-06-19 00:13:08 | dt 1
+2026-06-19 00:13:08 | n_history 1
+2026-06-19 00:13:08 | max_rollout_steps 10
+2026-06-19 00:13:08 | rollout_schedule [1, 2, 4, 6, 8, 10]
+2026-06-19 00:13:08 | rollout_stage_epochs [5, 5, 10, 10, 10, 10]
+2026-06-19 00:13:08 | valid_rollout_steps 1
+2026-06-19 00:13:08 | validate_with_train_rollout True
+2026-06-19 00:13:08 | eval_rollout_steps [1, 2, 4, 6, 8, 10]
+2026-06-19 00:13:08 | trainable_scope all
+2026-06-19 00:13:08 | checkpoint_metric valid_S10
+2026-06-19 00:13:08 | checkpoint_mode min
+2026-06-19 00:13:08 | stage_checkpoint_metric_mode stage_horizon
+2026-06-19 00:13:08 | nettype graph_weather
+2026-06-19 00:13:08 | target default
+2026-06-19 00:13:08 | resolution 5.625
+2026-06-19 00:13:08 | graph_path /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625.pt
+2026-06-19 00:13:08 | auto_build_graph True
+2026-06-19 00:13:08 | hidden_dim 96
+2026-06-19 00:13:08 | edge_dim 6
+2026-06-19 00:13:08 | num_heads 4
+2026-06-19 00:13:08 | k_neighbors 8
+2026-06-19 00:13:08 | encoder_blocks 1
+2026-06-19 00:13:08 | decoder_blocks 1
+2026-06-19 00:13:08 | l0_blocks 2
+2026-06-19 00:13:08 | l1_blocks 2
+2026-06-19 00:13:08 | l2_blocks 1
+2026-06-19 00:13:08 | l1_refine_blocks 1
+2026-06-19 00:13:08 | l0_refine_blocks 1
+2026-06-19 00:13:08 | graph_gradient_weight 0.0
+2026-06-19 00:13:08 | lr_schedule_type rollout_stage
+2026-06-19 00:13:08 | lr_by_rollout {1: 0.0001, 2: 0.0001, 4: 7e-05, 6: 6e-05, 8: 5e-05, 10: 3e-05}
+2026-06-19 00:13:08 | warmup_epochs 1
+2026-06-19 00:13:08 | in_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 00:13:08 | out_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 00:13:08 | normalization zscore
+2026-06-19 00:13:08 | add_grid False
+2026-06-19 00:13:08 | N_grid_channels 0
+2026-06-19 00:13:08 | gridtype sinusoidal
+2026-06-19 00:13:08 | add_noise False
+2026-06-19 00:13:08 | noise_std 0.0
+2026-06-19 00:13:08 | crop_size_x None
+2026-06-19 00:13:08 | crop_size_y None
+2026-06-19 00:13:08 | roll False
+2026-06-19 00:13:08 | orography False
+2026-06-19 00:13:08 | orography_path None
+2026-06-19 00:13:08 | train_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-19 00:13:08 | valid_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/valid
+2026-06-19 00:13:08 | test_dataset_path /lustre/home/ziya/KAI_5/kai_data_5p625/test
+2026-06-19 00:13:08 | global_means_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+2026-06-19 00:13:08 | global_stds_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+2026-06-19 00:13:08 | exp_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments
+2026-06-19 00:13:08 | eval_checkpoint_path /lustre/home/ziya/GNN/GraphWeather5p625/experiments/raw_5p625_full50_config_update_lr_schedule_update/best_ckpt_S6.tarbest_ckpt_S6.tar
+2026-06-19 00:13:08 | eval_output_dir None
+2026-06-19 00:13:08 | eval_forecast_steps [10]
+2026-06-19 00:13:08 | eval_fixed_rollout_steps 10
+2026-06-19 00:13:08 | eval_compare_stage_checkpoints False
+2026-06-19 00:13:08 | eval_stage_checkpoints {1: 'best_ckpt_S1.tar', 2: 'best_ckpt_S2.tar', 4: 'best_ckpt_S4.tar', 6: 'best_ckpt_S6.tar', 8: 'best_ckpt_S8.tar', 10: 'best_ckpt_S10.tar'}
+2026-06-19 00:13:08 | eval_global_best_checkpoint best_ckpt.tar
+2026-06-19 00:13:08 | eval_start_timestep 1
+2026-06-19 00:13:08 | eval_ic_stride 1
+2026-06-19 00:13:08 | n_initial_conditions 5
+2026-06-19 00:13:08 | climatology_path None
+2026-06-19 00:13:08 | compute_climatology True
+2026-06-19 00:13:08 | eval_device cuda
+2026-06-19 00:13:08 | eval_plot_variables ['msl', 't2m', 'z500', 't850']
+2026-06-19 00:13:08 | eval_plot_format png
+2026-06-19 00:13:08 | plot_persistence True
+2026-06-19 00:13:08 | save_checkpoint True
+2026-06-19 00:13:08 | resume True
+2026-06-19 00:13:08 | ---------------------------------------------------
+2026-06-19 00:13:26 | ------------------ Configuration ------------------
+2026-06-19 00:13:26 | Configuration file: /lustre/home/ziya/GNN/GraphWeather5p625/configs/gnn_5p625.yaml
+2026-06-19 00:13:26 | Configuration name: raw_5p625
+2026-06-19 00:13:26 | lr 0.0001
+2026-06-19 00:13:26 | weight_decay 0.0001
+2026-06-19 00:13:26 | scheduler CosineAnnealingLR
+2026-06-19 00:13:26 | max_epochs 150
+2026-06-19 00:13:26 | max_train_batches None
+2026-06-19 00:13:26 | max_valid_batches None
+2026-06-19 00:13:26 | batch_size 12
+2026-06-19 00:13:26 | num_data_workers 4
+2026-06-19 00:13:26 | enable_amp True
+2026-06-19 00:13:26 | max_gradient_norm 1.0
+2026-06-19 00:13:26 | dt 1
+2026-06-19 00:13:26 | n_history 1
+2026-06-19 00:13:26 | max_rollout_steps 10
+2026-06-19 00:13:26 | rollout_schedule [1, 2, 4, 6, 8, 10]
+2026-06-19 00:13:26 | rollout_stage_epochs [5, 5, 10, 10, 10, 10]
+2026-06-19 00:13:26 | valid_rollout_steps 1
+2026-06-19 00:13:26 | validate_with_train_rollout True
+2026-06-19 00:13:26 | eval_rollout_steps [1, 2, 4, 6, 8, 10]
+2026-06-19 00:13:26 | trainable_scope all
+2026-06-19 00:13:26 | checkpoint_metric valid_S10
+2026-06-19 00:13:26 | checkpoint_mode min
+2026-06-19 00:13:26 | stage_checkpoint_metric_mode stage_horizon
+2026-06-19 00:13:26 | nettype graph_weather
+2026-06-19 00:13:26 | target default
+2026-06-19 00:13:26 | resolution 5.625
+2026-06-19 00:13:26 | graph_path /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625.pt
+2026-06-19 00:13:26 | auto_build_graph True
+2026-06-19 00:13:26 | hidden_dim 96
+2026-06-19 00:13:26 | edge_dim 6
+2026-06-19 00:13:26 | num_heads 4
+2026-06-19 00:13:26 | k_neighbors 8
+2026-06-19 00:13:26 | encoder_blocks 1
+2026-06-19 00:13:26 | decoder_blocks 1
+2026-06-19 00:13:26 | l0_blocks 2
+2026-06-19 00:13:26 | l1_blocks 2
+2026-06-19 00:13:26 | l2_blocks 1
+2026-06-19 00:13:26 | l1_refine_blocks 1
+2026-06-19 00:13:26 | l0_refine_blocks 1
+2026-06-19 00:13:26 | graph_gradient_weight 0.0
+2026-06-19 00:13:26 | lr_schedule_type rollout_stage
+2026-06-19 00:13:26 | lr_by_rollout {1: 0.0001, 2: 0.0001, 4: 7e-05, 6: 6e-05, 8: 5e-05, 10: 3e-05}
+2026-06-19 00:13:26 | warmup_epochs 1
+2026-06-19 00:13:26 | in_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 00:13:26 | out_channels [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+2026-06-19 00:13:26 | normalization zscore
+2026-06-19 00:13:26 | add_grid False
+2026-06-19 00:13:26 | N_grid_channels 0
+2026-06-19 00:13:26 | gridtype sinusoidal
+2026-06-19 00:13:26 | add_noise False
+2026-06-19 00:13:26 | noise_std 0.0
+2026-06-19 00:13:26 | crop_size_x None
+2026-06-19 00:13:26 | crop_size_y None
+2026-06-19 00:13:26 | roll False
+2026-06-19 00:13:26 | orography False
+2026-06-19 00:13:26 | orography_path None
+2026-06-19 00:13:26 | train_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-19 00:13:26 | valid_data_path /lustre/home/ziya/KAI_5/kai_data_5p625/valid
+2026-06-19 00:13:26 | test_dataset_path /lustre/home/ziya/KAI_5/kai_data_5p625/test
+2026-06-19 00:13:26 | global_means_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+2026-06-19 00:13:26 | global_stds_path /lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+2026-06-19 00:13:26 | exp_dir /lustre/home/ziya/GNN/GraphWeather5p625/experiments
+2026-06-19 00:13:26 | eval_checkpoint_path /lustre/home/ziya/GNN/GraphWeather5p625/experiments/raw_5p625_full50_config_update_lr_schedule_update/best_ckpt_S6.tar
+2026-06-19 00:13:26 | eval_output_dir None
+2026-06-19 00:13:26 | eval_forecast_steps [10]
+2026-06-19 00:13:26 | eval_fixed_rollout_steps 10
+2026-06-19 00:13:26 | eval_compare_stage_checkpoints False
+2026-06-19 00:13:26 | eval_stage_checkpoints {1: 'best_ckpt_S1.tar', 2: 'best_ckpt_S2.tar', 4: 'best_ckpt_S4.tar', 6: 'best_ckpt_S6.tar', 8: 'best_ckpt_S8.tar', 10: 'best_ckpt_S10.tar'}
+2026-06-19 00:13:26 | eval_global_best_checkpoint best_ckpt.tar
+2026-06-19 00:13:26 | eval_start_timestep 1
+2026-06-19 00:13:26 | eval_ic_stride 1
+2026-06-19 00:13:26 | n_initial_conditions 5
+2026-06-19 00:13:26 | climatology_path None
+2026-06-19 00:13:26 | compute_climatology True
+2026-06-19 00:13:26 | eval_device cuda
+2026-06-19 00:13:26 | eval_plot_variables ['msl', 't2m', 'z500', 't850']
+2026-06-19 00:13:26 | eval_plot_format png
+2026-06-19 00:13:26 | plot_persistence True
+2026-06-19 00:13:26 | save_checkpoint True
+2026-06-19 00:13:26 | resume True
+2026-06-19 00:13:26 | ---------------------------------------------------
+2026-06-19 00:13:26 | Running evaluation on: /lustre/home/ziya/KAI_5/kai_data_5p625/test/2020.nc
+2026-06-19 00:13:26 | Computing daily climatology from: /lustre/home/ziya/KAI_5/kai_data_5p625/train
+2026-06-19 00:13:34 | Saved climatology: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/daily_climatology.npz
+2026-06-19 00:13:35 | Loaded checkpoint: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/raw_5p625_full50_config_update_lr_schedule_update/best_ckpt_S6.tar | epoch=27 | train_rollout_steps=6
+2026-06-19 00:13:35 | Evaluation model parameters: 1131103
+2026-06-19 00:13:35 | Evaluating global best with fixed rollout_steps=10 over 5 initial conditions: first_ic=1
+2026-06-19 00:13:36 | global best completed IC 5/5 (ic=5)
+2026-06-19 00:13:36 | ================================================================================
+2026-06-19 00:13:36 | FIXED ROLLOUT EVALUATION SUMMARY steps=10
+2026-06-19 00:13:36 | ================================================================================
+2026-06-19 00:13:36 | rollout_steps=10 lead 00 | mean RMSE 0.000000 | mean ACC 0.985058
+2026-06-19 00:13:36 | rollout_steps=10 lead 01 | mean RMSE 126.900359 | mean ACC 0.896653
+2026-06-19 00:13:36 | rollout_steps=10 lead 02 | mean RMSE 193.396387 | mean ACC 0.824035
+2026-06-19 00:13:36 | rollout_steps=10 lead 03 | mean RMSE 242.646475 | mean ACC 0.759375
+2026-06-19 00:13:36 | rollout_steps=10 lead 04 | mean RMSE 285.353693 | mean ACC 0.698074
+2026-06-19 00:13:36 | rollout_steps=10 lead 05 | mean RMSE 326.950049 | mean ACC 0.637786
+2026-06-19 00:13:36 | rollout_steps=10 lead 06 | mean RMSE 367.279799 | mean ACC 0.576839
+2026-06-19 00:13:36 | rollout_steps=10 lead 07 | mean RMSE 407.313928 | mean ACC 0.526395
+2026-06-19 00:13:36 | rollout_steps=10 lead 08 | mean RMSE 449.705887 | mean ACC 0.476616
+2026-06-19 00:13:36 | rollout_steps=10 lead 09 | mean RMSE 494.939236 | mean ACC 0.416279
+2026-06-19 00:13:36 | rollout_steps=10 lead 10 | mean RMSE 542.686980 | mean ACC 0.346786
+2026-06-19 00:13:36 | Saved metrics: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/S10/evaluation_metrics.csv
+2026-06-19 00:13:36 | Saved RMSE: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/S10/rollout_rmse.csv
+2026-06-19 00:13:36 | Saved ACC: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/S10/rollout_acc.csv
+2026-06-19 00:13:36 | Evaluating persistence with fixed rollout_steps=10 over 5 initial conditions
+2026-06-19 00:13:37 | Saved fixed-rollout comparison JSON: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/fixed10_global_best_metrics.json
+2026-06-19 00:13:37 | Saved rollout plot for msl: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/plots/fixed10_global_best_msl_rmse_acc.png
+2026-06-19 00:13:38 | Saved rollout plot for t2m: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/plots/fixed10_global_best_t2m_rmse_acc.png
+2026-06-19 00:13:38 | Saved rollout plot for z500: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/plots/fixed10_global_best_z500_rmse_acc.png
+2026-06-19 00:13:38 | Saved rollout plot for t850: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/evaluation/plots/fixed10_global_best_t850_rmse_acc.png
