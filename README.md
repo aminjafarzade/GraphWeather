@@ -55,11 +55,16 @@ GraphWeather5p625/
 
 Use Python 3.10 or newer.
 
+Clone the repository and run commands from the repository root:
+
+```bash
+git clone https://github.com/aminjafarzade/GraphWeather.git GraphWeather5p625
+cd GraphWeather5p625
+```
+
 ### Option A: conda
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 conda create -n graphweather5p625 python=3.10 -y
 conda activate graphweather5p625
 
@@ -70,8 +75,6 @@ python -m pip install -r requirements.txt
 ### Option B: venv
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 python3.10 -m venv .venv
 source .venv/bin/activate
 
@@ -85,13 +88,14 @@ The rollout map visualization requires Cartopy. If `pip install -r requirements.
 
 ## Data Expected
 
-The default config points to:
+The default config uses repo-relative template paths:
 
 ```text
-/lustre/home/ziya/KAI_5/kai_data_5p625/train
-/lustre/home/ziya/KAI_5/kai_data_5p625/valid
-/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
-/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
+data/kai_data_5p625/train
+data/kai_data_5p625/valid
+data/kai_data_5p625/test
+data/kai_data_5p625/stats/global_mean.npy
+data/kai_data_5p625/stats/global_std.npy
 ```
 
 Each NetCDF file is expected to contain:
@@ -102,15 +106,13 @@ fields[time, channel, latitude, longitude]
 
 The included KAI_5 files are daily. With these files, `dt: 1` means one forecast day, and `S=10` means a 10-day rollout.
 
-If your data lives elsewhere, edit `train_data_path`, `valid_data_path`, `global_means_path`, and `global_stds_path` in `configs/gnn_5p625.yaml`.
+Put your dataset at that location, symlink `data/kai_data_5p625` to your dataset root, or edit `train_data_path`, `valid_data_path`, `test_dataset_path`, `global_means_path`, and `global_stds_path` in `configs/gnn_5p625.yaml`.
 
 ## Build Or Rebuild The Graph
 
 The archive includes `graphs/graph_5p625.pt`. Rebuild it only if you change the grid or want to regenerate it:
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 python scripts/build_graph.py \
   --output graphs/graph_5p625.pt \
   --resolution 5.625 \
@@ -126,8 +128,6 @@ python scripts/build_graph.py \
 Basic 2-epoch smoke run:
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 python scripts/train.py \
   --yaml_config configs/gnn_5p625.yaml \
   --config smoke_5p625 \
@@ -164,8 +164,6 @@ python scripts/train.py \
 The `raw_5p625` config is set for 150 epochs:
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 python scripts/train.py \
   --yaml_config configs/gnn_5p625.yaml \
   --config raw_5p625 \
@@ -235,8 +233,6 @@ For stage-specific checkpoints, `stage_checkpoint_metric_mode: stage_horizon` se
 After training, run the standalone evaluator with the same config that was used for the checkpoint. Evaluation uses a fixed autoregressive rollout horizon. For final reports, evaluate one checkpoint for 10 days:
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 python scripts/evaluate.py \
   --yaml_config configs/gnn_5p625.yaml \
   --config raw_5p625 \
@@ -383,8 +379,6 @@ If evaluating a smoke checkpoint trained with the small debug architecture, use 
 Use `scripts/visualize_rollout_maps.py` to inspect ground truth, prediction, and bias maps for selected variables and lead times. The script uses Cartopy, so coastlines and country borders are drawn on every panel.
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
 python scripts/visualize_rollout_maps.py \
   --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
   --config configs/gnn_5p625.yaml \
