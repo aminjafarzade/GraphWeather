@@ -6,6 +6,8 @@ from typing import Any
 import torch
 from torch import nn
 
+from .graph_builder import validate_graph_cache_metadata
+
 
 class GraphLevel(nn.Module):
     def __init__(self, level_dict: dict[str, Any]):
@@ -35,12 +37,20 @@ class GraphBundle(nn.Module):
         self.register_buffer("pool_L1_to_L2", pool["L1_to_L2"].to(torch.long), persistent=False)
 
 
-def load_graph_bundle(path: str, map_location: str | torch.device = "cpu") -> GraphBundle:
+def load_graph_bundle(
+    path: str,
+    map_location: str | torch.device = "cpu",
+    expected_metadata: dict[str, Any] | None = None,
+) -> GraphBundle:
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Graph bundle not found: {path}")
     try:
         raw = torch.load(path, map_location=map_location, weights_only=True)
     except TypeError:
         raw = torch.load(path, map_location=map_location)
+    if expected_metadata is not None:
+        mismatches = validate_graph_cache_metadata(raw, expected_metadata)
+        if mismatches:
+            details = "\n  ".join(mismatches)
+            raise ValueError(f"Graph bundle metadata mismatch for {path}:\n  {details}")
     return GraphBundle(raw)
-

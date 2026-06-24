@@ -227,6 +227,8 @@ def _resolve_config_args(args: argparse.Namespace) -> tuple[str, str]:
         looks_like_yaml = args.config.endswith((".yaml", ".yml")) or Path(args.config).exists()
         if looks_like_yaml:
             yaml_path = args.config
+            if config_name is None and Path(args.config).name == "weather_dual_resolution.yaml":
+                config_name = "raw"
         elif config_name is None:
             config_name = args.config
 
@@ -401,6 +403,8 @@ def _build_dataset(params: Any, split: str, rollout_steps: int) -> ClimateNetCDF
         rollout_steps=int(rollout_steps),
         batch_size=1,
         num_workers=0,
+        resolution_mode=str(_get(params, "resolution_mode", "5p625")),
+        expected_grid_shape=_get(params, "expected_grid_shape", _get(params, "grid_shape", None)),
     )
     return ClimateNetCDFDataset(data_cfg, _split_data_path(params, split), train=False)
 
@@ -668,6 +672,12 @@ def _apply_coordinate_orders(seq: np.ndarray, lat_order: np.ndarray, lon_order: 
 
 def _build_model(params: Any, dataset: ClimateNetCDFDataset, inp: torch.Tensor, target_seq: torch.Tensor, device: torch.device) -> GraphWeatherModel:
     graph = load_graph_bundle(params.graph_path, map_location="cpu").to(device)
+    graph_mode = graph.metadata.get("resolution_mode", None)
+    active_mode = str(_get(params, "resolution_mode", "5p625"))
+    if graph_mode is None and active_mode != "5p625":
+        raise ValueError(f"Graph cache has no resolution metadata and cannot be used for {active_mode}.")
+    if graph_mode is not None and str(graph_mode) != active_mode:
+        raise ValueError(f"Graph cache mode {graph_mode} does not match active mode {active_mode}.")
     model = GraphWeatherModel(
         graph=graph,
         grid_shape=(int(dataset.img_shape_x), int(dataset.img_shape_y)),
@@ -694,9 +704,32 @@ def _load_checkpoint(model: GraphWeatherModel, checkpoint_path: str, device: tor
     cleaned = OrderedDict()
     for key, value in state.items():
         cleaned[key[7:] if key.startswith("module.") else key] = value
-    model.load_state_dict(cleaned, strict=True)
+    metadata = dict(checkpoint.get("metadata", {}))
+    use_delta_normalization = bool(metadata.get("use_delta_normalization", False))
+    if use_delta_normalization and ("delta_mean" not in cleaned or "delta_std" not in cleaned):
+        raise RuntimeError("Delta normalization is enabled but checkpoint lacks delta_mean/delta_std buffers.")
+    missing, unexpected = model.load_state_dict(cleaned, strict=False)
+    allowed_missing = set() if use_delta_normalization else {"delta_mean", "delta_std"}
+    bad_missing = [key for key in missing if key not in allowed_missing]
+    if bad_missing or unexpected:
+        raise RuntimeError(f"Checkpoint model_state mismatch. Missing={bad_missing}; unexpected={list(unexpected)}")
+    model.use_delta_normalization = use_delta_normalization
+    model.delta_norm_center = bool(metadata.get("delta_norm_center", False))
     model.eval()
     return checkpoint
+
+
+def _validate_checkpoint_resolution(checkpoint: dict[str, Any], params: Any) -> None:
+    metadata = dict(checkpoint.get("metadata", {}))
+    active_mode = str(_get(params, "resolution_mode", "5p625"))
+    checkpoint_mode = metadata.get("resolution_mode", None)
+    if checkpoint_mode is None:
+        if active_mode == "5p625":
+            logging.warning("Checkpoint has no resolution metadata; treating it as legacy 5p625.")
+            return
+        raise RuntimeError(f"Cannot visualize a legacy checkpoint without resolution metadata in {active_mode} mode.")
+    if str(checkpoint_mode) != active_mode:
+        raise RuntimeError(f"Cannot visualize a {checkpoint_mode} checkpoint in {active_mode} mode.")
 
 
 @torch.no_grad()
@@ -1029,6 +1062,8 @@ def plot_variable_rollout_maps(
     same_scale_across_leads: bool,
     add_cyclic: bool,
     avg_sample_rmse: np.ndarray | None = None,
+    resolution_mode: str = "5p625",
+    grid_shape: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     rows = len(lead_times)
     fig = plt.figure(
@@ -1141,9 +1176,12 @@ def plot_variable_rollout_maps(
 
     checkpoint_stem = Path(checkpoint_path).stem
     if show_titles:
+        grid_text = ""
+        if grid_shape is not None:
+            grid_text = f" | grid: {int(grid_shape[0])}x{int(grid_shape[1])}"
         fig.suptitle(
             f"Variable: {variable_label} | {aggregate_label} | checkpoint: {checkpoint_stem} | "
-            f"fixed rollout {rollout_steps} days",
+            f"mode: {resolution_mode}{grid_text} | fixed rollout {rollout_steps} days",
             fontsize=13,
         )
     fig.subplots_adjust(
@@ -1298,6 +1336,7 @@ def main() -> None:
     parser.add_argument("--config", default=None, type=str, help="Config YAML path or config section name.")
     parser.add_argument("--yaml_config", default=None, type=str, help="Explicit YAML config path.")
     parser.add_argument("--config_name", default=None, type=str, help="YAML section name, default raw_5p625.")
+    parser.add_argument("--resolution_mode", default=None, type=str, help="5p625 or 2p5; overrides YAML resolution_mode.")
     parser.add_argument("--split", default="valid", choices=["train", "valid", "test"])
     parser.add_argument("--aggregate_mode", default="sample", choices=["sample", "year_mean"])
     parser.add_argument("--sample_index", default=0, type=int)
@@ -1333,7 +1372,7 @@ def main() -> None:
     args = parser.parse_args()
 
     yaml_path, config_name = _resolve_config_args(args)
-    params = YParams(yaml_path, config_name)
+    params = YParams(yaml_path, config_name, resolution_mode=args.resolution_mode)
     rollout_steps = int(args.rollout_steps)
     lead_times = [int(x) for x in _parse_items([str(v) for v in args.lead_times])]
     if not lead_times:
@@ -1419,6 +1458,7 @@ def main() -> None:
     target_seq = _target_sequence(target)
     model = _build_model(params, dataset, inp, target_seq, device)
     checkpoint = _load_checkpoint(model, checkpoint_path, device)
+    _validate_checkpoint_resolution(checkpoint, params)
     metadata = dict(checkpoint.get("metadata", {}))
     logging.info(
         "Loaded checkpoint: %s | epoch=%s | train_rollout_steps=%s",
@@ -1437,6 +1477,8 @@ def main() -> None:
         "max_batches": args.max_batches,
         "rollout_steps": rollout_steps,
         "lead_times": lead_times,
+        "resolution_mode": str(_get(params, "resolution_mode", "5p625")),
+        "grid_shape": [int(dataset.img_shape_x), int(dataset.img_shape_y)],
         "denormalize_requested": bool(args.denormalize),
         "denormalized": None,
         "convert_z_to_height": bool(args.convert_z_to_height),
@@ -1548,6 +1590,8 @@ def main() -> None:
             same_scale_across_leads=bool(args.same_scale_across_leads),
             add_cyclic=bool(args.add_cyclic),
             avg_sample_rmse=avg_sample_rmse,
+            resolution_mode=str(_get(params, "resolution_mode", "5p625")),
+            grid_shape=(int(dataset.img_shape_x), int(dataset.img_shape_y)),
         )
         metadata_payload["variables"][str(variable["name"])] = {
             "label": variable["label"],

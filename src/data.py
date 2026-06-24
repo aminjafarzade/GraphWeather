@@ -36,6 +36,11 @@ class DataConfig:
     rollout_steps: int = 1
     batch_size: int = 1
     num_workers: int = 0
+    pin_memory: bool = False
+    persistent_workers: bool = False
+    prefetch_factor: Optional[int] = None
+    resolution_mode: str = "5p625"
+    expected_grid_shape: Optional[Sequence[int]] = None
 
 
 def _load_netcdf4():
@@ -54,18 +59,50 @@ def _normalization_vectors(
     stds: np.ndarray,
     channels: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
+    channels = np.asarray(channels, dtype=np.int64)
     if means.ndim == 4:
         m = means.squeeze()[channels]
         s = stds.squeeze()[channels]
     elif means.ndim == 2:
-        m = means[0, channels]
-        s = stds[0, channels]
+        if means.shape[0] == 2 and means.shape[1] == channels.size and int(channels.max(initial=-1)) < channels.size:
+            m = means[-1, channels]
+            s = stds[-1, channels]
+        else:
+            m = means[0, channels]
+            s = stds[0, channels]
     elif means.ndim == 1:
-        m = means[channels]
-        s = stds[channels]
+        if means.shape[0] == 2 * channels.size and int(channels.max(initial=-1)) < channels.size:
+            m = means[channels.size + channels]
+            s = stds[channels.size + channels]
+        else:
+            m = means[channels]
+            s = stds[channels]
     else:
         raise ValueError(f"Unexpected normalization stats shape: {means.shape}")
     return m.astype(np.float32), s.astype(np.float32)
+
+
+def _validate_stats_channels(
+    means: np.ndarray,
+    stds: np.ndarray,
+    required_channels: np.ndarray,
+) -> None:
+    max_channel = int(required_channels.max()) if required_channels.size else -1
+    for label, arr in (("global_means_path", means), ("global_stds_path", stds)):
+        squeezed = np.asarray(arr).squeeze()
+        if squeezed.ndim == 2:
+            channel_count = int(squeezed.shape[-1])
+        elif squeezed.ndim == 1:
+            channel_count = int(squeezed.shape[0])
+        elif squeezed.ndim == 4:
+            channel_count = int(np.asarray(arr).shape[1])
+        else:
+            raise ValueError(f"Unexpected normalization stats shape for {label}: {arr.shape}")
+        if max_channel >= channel_count:
+            raise ValueError(
+                f"{label} has {channel_count} channels, but channel index {max_channel} is required. "
+                "Check resolution-specific normalization statistics."
+            )
 
 
 def _apply_normalization(
@@ -206,6 +243,8 @@ class ClimateNetCDFDataset(Dataset):
                 raise ValueError("global_means_path and global_stds_path are required.")
             self.means = np.load(config.global_means_path)
             self.stds = np.load(config.global_stds_path)
+            required_channels = np.unique(np.concatenate([self.in_channels, self.out_channels]))
+            _validate_stats_channels(self.means, self.stds, required_channels)
 
         self.orography_field: Optional[np.ndarray] = None
         if config.orography:
@@ -221,6 +260,11 @@ class ClimateNetCDFDataset(Dataset):
         self._discover_shapes()
         self._build_index()
 
+    def output_normalization_vectors(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.means is None or self.stds is None:
+            raise ValueError("Normalization vectors are unavailable because normalization is disabled.")
+        return _normalization_vectors(self.means, self.stds, self.out_channels)
+
     def _discover_shapes(self) -> None:
         self._file_lengths: list[int] = []
         self.img_shape_x: Optional[int] = None
@@ -234,8 +278,18 @@ class ClimateNetCDFDataset(Dataset):
                 if self.img_shape_x is None:
                     self.img_shape_x = int(height)
                     self.img_shape_y = int(width)
+                    self._warn_coordinate_issues(ds, int(height), int(width), path)
                 elif (height, width) != (self.img_shape_x, self.img_shape_y):
                     raise ValueError(f"Inconsistent grid in {path}: {(height, width)}")
+        expected = self.config.expected_grid_shape
+        if expected is not None:
+            expected_shape = (int(expected[0]), int(expected[1]))
+            actual_shape = (int(self.img_shape_x), int(self.img_shape_y))
+            if actual_shape != expected_shape:
+                raise ValueError(
+                    f"Expected {self.config.resolution_mode} grid shape {expected_shape}, "
+                    f"received {actual_shape}. Check resolution_mode and dataset path."
+                )
         logging.info(
             "Found %d NetCDF files under %s. Spatial dims: %d x %d.",
             len(self.files_paths),
@@ -243,6 +297,23 @@ class ClimateNetCDFDataset(Dataset):
             self.img_shape_x,
             self.img_shape_y,
         )
+
+    def _warn_coordinate_issues(self, ds: object, height: int, width: int, path: str) -> None:
+        variables = getattr(ds, "variables", {})
+        lat_key = "latitude" if "latitude" in variables else "lat" if "lat" in variables else None
+        lon_key = "longitude" if "longitude" in variables else "lon" if "lon" in variables else None
+        if lat_key is not None:
+            latitudes = np.asarray(variables[lat_key][:], dtype=np.float64).reshape(-1)
+            if latitudes.size != height:
+                logging.warning("Latitude coordinate length %d does not match grid height %d in %s.", latitudes.size, height, path)
+            if np.any(np.isclose(np.abs(latitudes), 90.0)):
+                logging.warning("Latitude coordinates in %s include exact +/-90 degree centers.", path)
+        if lon_key is not None:
+            longitudes = np.asarray(variables[lon_key][:], dtype=np.float64).reshape(-1)
+            if longitudes.size != width:
+                logging.warning("Longitude coordinate length %d does not match grid width %d in %s.", longitudes.size, width, path)
+            if np.any(np.isclose(longitudes, 0.0)) and np.any(np.isclose(longitudes, 360.0)):
+                logging.warning("Longitude coordinates in %s include both 0 and 360 degrees.", path)
 
     def _build_index(self) -> None:
         dt = int(self.config.dt)
@@ -361,12 +432,32 @@ def build_data_loader(
     train: bool = True,
 ) -> tuple[DataLoader, ClimateNetCDFDataset]:
     dataset = ClimateNetCDFDataset(config=config, data_dir=data_dir, train=train)
+    num_workers = int(config.num_workers)
+    persistent_workers = bool(config.persistent_workers) and num_workers > 0
+    loader_kwargs = {
+        "batch_size": int(config.batch_size),
+        "shuffle": bool(train),
+        "num_workers": num_workers,
+        "drop_last": bool(train),
+        "pin_memory": bool(config.pin_memory),
+        "persistent_workers": persistent_workers,
+    }
+    if num_workers > 0 and config.prefetch_factor is not None:
+        loader_kwargs["prefetch_factor"] = int(config.prefetch_factor)
     loader = DataLoader(
         dataset,
-        batch_size=config.batch_size,
-        shuffle=train,
-        num_workers=config.num_workers,
-        drop_last=True,
-        pin_memory=torch.cuda.is_available(),
+        **loader_kwargs,
+    )
+    logging.info(
+        "DataLoader %s | target_rollout_steps=%d | batch_size=%d | num_workers=%d | "
+        "pin_memory=%s | persistent_workers=%s | prefetch_factor=%s | drop_last=%s",
+        "train" if train else "eval",
+        int(config.rollout_steps),
+        int(config.batch_size),
+        num_workers,
+        bool(config.pin_memory),
+        persistent_workers,
+        config.prefetch_factor if num_workers > 0 else None,
+        bool(train),
     )
     return loader, dataset

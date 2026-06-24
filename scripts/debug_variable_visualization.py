@@ -608,6 +608,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default=None, type=str, help="Config YAML path or config section name.")
     parser.add_argument("--yaml_config", default=None, type=str)
     parser.add_argument("--config_name", default=None, type=str)
+    parser.add_argument("--resolution_mode", default=None, type=str)
     parser.add_argument("--split", default="valid", choices=["train", "valid", "test"])
     parser.add_argument("--variables", nargs="*", default=["msl", "t2m", "t850", "z500"])
     parser.add_argument("--rollout_steps", default=10, type=int)
@@ -636,7 +637,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     yaml_path, config_name = viz._resolve_config_args(args)
-    params = YParams(yaml_path, config_name)
+    params = YParams(yaml_path, config_name, resolution_mode=args.resolution_mode)
     rollout_steps = int(args.rollout_steps)
     lead_times = [int(x) for x in viz._parse_items([str(v) for v in args.lead_times])]
     if not lead_times:

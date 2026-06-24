@@ -29,12 +29,18 @@ default: &DEFAULT
   nettype: "graph_weather"
   target: "default"
   resolution: 5.625
-  graph_path: "graphs/graph_5p625.pt"
+  graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625_k8_hybrid_row_aware_v2.pt"
   auto_build_graph: true
   hidden_dim: 96
   edge_dim: 6
   num_heads: 4
   k_neighbors: 8
+  graph_connectivity_strategy: "hybrid_row_aware_knn"
+  row_aware_knn:
+    enabled: true
+    interior_neighbors_from_north_row: 1
+    interior_neighbors_from_south_row: 1
+    polar_neighbors_from_adjacent_row: 2
   encoder_blocks: 1
   decoder_blocks: 1
   l0_blocks: 2
@@ -76,12 +82,12 @@ default: &DEFAULT
   orography: false
   orography_path: null
 
-  train_data_path: "data/kai_data_5p625/train"
-  valid_data_path: "data/kai_data_5p625/valid"
-  test_dataset_path: "data/kai_data_5p625/test"
-  global_means_path: "data/kai_data_5p625/stats/global_mean.npy"
-  global_stds_path: "data/kai_data_5p625/stats/global_std.npy"
-  exp_dir: "experiments"
+  train_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/train"
+  valid_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/valid"
+  test_dataset_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/test"
+  global_means_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy"
+  global_stds_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy"
+  exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
 
   # Standalone evaluation. Override eval_checkpoint_path from the CLI unless
   # you want to hard-code a specific checkpoint here.
@@ -103,6 +109,7 @@ default: &DEFAULT
   n_initial_conditions: 5
   climatology_path: null
   compute_climatology: true
+  climatology_chunk_size: 128
   eval_device: "cuda"
   eval_plot_variables: []
   eval_plot_format: "png"

@@ -1,2 +1,1 @@
-"""Self-contained 5.625-degree graph weather prototype."""
-
+"""Self-contained dual-resolution graph weather prototype."""

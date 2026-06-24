@@ -1,19 +1,29 @@
 # GraphWeather5p625
 
-Self-contained direct-grid spherical Graph U-Net prototype for weather forecasting on the `KAI_5/kai_data_5p625` dataset.
+Self-contained direct-grid spherical Graph U-Net prototype for weather forecasting on 5.625-degree and 2.5-degree latitude/longitude grids.
 
 This package does not import from `GNN/KAI-Atmos`. It keeps a similar user interface: YAML configs, `scripts/train.py`, KAI-style NetCDF data loading, experiment folders, logs, and checkpoints.
 
+## Source Repository
+
+Remote repository: <https://github.com/aminjafarzade/GraphWeather.git>
+
 ## What This Version Implements
 
-This version implements a 5.625-degree graph weather model and fixes the training/validation reporting issues from the earlier prototype.
+This version supports the original 5.625-degree model and a direct 2.5-degree baseline. Both modes use the same Graph U-Net architecture; only the graph/data resolution changes.
 
-- Uses the actual KAI_5 5.625-degree grid: `32 x 64 = 2048` native nodes.
-- Builds a three-level graph pyramid:
+- `5p625` mode uses `32 x 64 = 2048` native nodes.
+- `2p5` mode uses `72 x 144 = 10368` native nodes.
+- Both modes build exactly three graph levels, with no L3:
   - `L0: 32 x 64 = 2048`
   - `L1: 16 x 32 = 512`
   - `L2: 8 x 16 = 128`
-- Uses directed spherical kNN edges with `k=8`.
+- In `2p5` mode the levels are:
+  - `L0: 72 x 144 = 10368`
+  - `L1: 36 x 72 = 2592`
+  - `L2: 18 x 36 = 648`
+- Uses directed hybrid row-aware spherical kNN edges with `k=8`.
+- Keeps input channels `134`, output channels `67`, hidden dimension `96`, and trainable parameters `1,131,103` in both modes.
 - Predicts a tendency `delta`, then returns `x_current + delta`.
 - Supports unchunked autoregressive rollout training.
 - Uses daily rollout defaults capped at `S=10`, because the current KAI_5 files are daily.
@@ -30,7 +40,9 @@ The architecture itself is not tied to a specific experiment folder. The include
 ```text
 GraphWeather5p625/
   configs/gnn_5p625.yaml       # training configs
-  graphs/graph_5p625.pt        # prebuilt 5.625-degree graph bundle
+  configs/weather_dual_resolution.yaml  # 5p625/2p5 switchable config
+  graphs/graph_5p625_k8_hybrid_row_aware_v2.pt  # 5.625-degree graph bundle
+  graphs/graph_2p5_k8_hybrid_row_aware_v2.pt    # 2.5-degree graph bundle
   scripts/build_graph.py       # graph builder CLI
   scripts/evaluate.py          # RMSE/ACC evaluation CLI
   scripts/train.py             # training CLI
@@ -55,16 +67,11 @@ GraphWeather5p625/
 
 Use Python 3.10 or newer.
 
-Clone the repository and run commands from the repository root:
-
-```bash
-git clone https://github.com/aminjafarzade/GraphWeather.git GraphWeather5p625
-cd GraphWeather5p625
-```
-
 ### Option A: conda
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 conda create -n graphweather5p625 python=3.10 -y
 conda activate graphweather5p625
 
@@ -75,6 +82,8 @@ python -m pip install -r requirements.txt
 ### Option B: venv
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 python3.10 -m venv .venv
 source .venv/bin/activate
 
@@ -88,14 +97,13 @@ The rollout map visualization requires Cartopy. If `pip install -r requirements.
 
 ## Data Expected
 
-The default config uses repo-relative template paths:
+The default config points to:
 
 ```text
-data/kai_data_5p625/train
-data/kai_data_5p625/valid
-data/kai_data_5p625/test
-data/kai_data_5p625/stats/global_mean.npy
-data/kai_data_5p625/stats/global_std.npy
+/lustre/home/ziya/KAI_5/kai_data_5p625/train
+/lustre/home/ziya/KAI_5/kai_data_5p625/valid
+/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
+/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
 ```
 
 Each NetCDF file is expected to contain:
@@ -106,21 +114,60 @@ fields[time, channel, latitude, longitude]
 
 The included KAI_5 files are daily. With these files, `dt: 1` means one forecast day, and `S=10` means a 10-day rollout.
 
-Put your dataset at that location, symlink `data/kai_data_5p625` to your dataset root, or edit `train_data_path`, `valid_data_path`, `test_dataset_path`, `global_means_path`, and `global_stds_path` in `configs/gnn_5p625.yaml`.
+If your data lives elsewhere, edit `train_data_path`, `valid_data_path`, `global_means_path`, and `global_stds_path` in `configs/gnn_5p625.yaml`.
+
+## Dual-Resolution Mode
+
+Use `configs/weather_dual_resolution.yaml` when switching by one config value or CLI argument:
+
+```bash
+python scripts/train.py \
+  --config configs/weather_dual_resolution.yaml \
+  --resolution_mode 5p625 \
+  --run_num rowaware_5p625
+
+python scripts/train.py \
+  --config configs/weather_dual_resolution.yaml \
+  --resolution_mode 2p5 \
+  --run_num baseline_2p5
+```
+
+Supported aliases are `5.625`, `5p625`, `5deg625`, `2.5`, `2p5`, and `2deg5`.
+
+The active profile controls data paths, graph path, batch size, and gradient accumulation:
+
+```text
+5p625: grid 32 x 64, batch_size 12, gradient_accumulation_steps 1
+2p5:   grid 72 x 144, batch_size 2,  gradient_accumulation_steps 6
+```
+
+The 2.5-degree profile expects separate 2.5-degree NetCDF files and normalization statistics. Do not reuse 5.625-degree statistics for `2p5`; the loader validates grid shape and channel-count compatibility.
+
+Graph sizes with `k=8`:
+
+```text
+5p625: nodes [2048, 512, 128], edges [16384, 4096, 1024]
+2p5:   nodes [10368, 2592, 648], edges [82944, 20736, 5184]
+```
+
+The 2.5-degree baseline is direct resolution scaling only. It does not add a coarser graph level, static features, mesh nodes, hidden dimensions, or extra blocks. Runtime and activation memory are higher because there are more nodes, but the model weights are unchanged.
 
 ## Build Or Rebuild The Graph
 
-The archive includes `graphs/graph_5p625.pt`. Rebuild it only if you change the grid or want to regenerate it:
+The archive includes mode-specific row-aware graph bundles. Rebuild them only if you change the grid, coordinates, or graph settings:
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 python scripts/build_graph.py \
-  --output graphs/graph_5p625.pt \
-  --resolution 5.625 \
-  --lat-count 32 \
-  --lon-count 64 \
-  --lat-start -87.1875 \
-  --lon-start -180.0 \
-  --k 8
+  --config configs/weather_dual_resolution.yaml \
+  --resolution_mode 5p625 \
+  --force_rebuild
+
+python scripts/build_graph.py \
+  --config configs/weather_dual_resolution.yaml \
+  --resolution_mode 2p5 \
+  --force_rebuild
 ```
 
 ## Smoke Tests
@@ -128,6 +175,8 @@ python scripts/build_graph.py \
 Basic 2-epoch smoke run:
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 python scripts/train.py \
   --yaml_config configs/gnn_5p625.yaml \
   --config smoke_5p625 \
@@ -164,6 +213,8 @@ python scripts/train.py \
 The `raw_5p625` config is set for 150 epochs:
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 python scripts/train.py \
   --yaml_config configs/gnn_5p625.yaml \
   --config raw_5p625 \
@@ -233,6 +284,8 @@ For stage-specific checkpoints, `stage_checkpoint_metric_mode: stage_horizon` se
 After training, run the standalone evaluator with the same config that was used for the checkpoint. Evaluation uses a fixed autoregressive rollout horizon. For final reports, evaluate one checkpoint for 10 days:
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 python scripts/evaluate.py \
   --yaml_config configs/gnn_5p625.yaml \
   --config raw_5p625 \
@@ -245,6 +298,20 @@ python scripts/evaluate.py \
   --device cuda \
   --plot_variables t2m,z500,msl
 ```
+
+Dual-resolution evaluation uses the same script and active mode:
+
+```bash
+python scripts/evaluate.py \
+  --config configs/weather_dual_resolution.yaml \
+  --resolution_mode 2p5 \
+  --checkpoint experiments/raw_2p5_baseline_2p5/best_ckpt.tar \
+  --output_dir experiments/raw_2p5_baseline_2p5/evaluation \
+  --rollout_steps 10 \
+  --plot_variables t2m,z500,msl
+```
+
+The evaluator resolves the graph, grid shape, normalization statistics, and persistence baseline from the active resolution profile and checkpoint metadata.
 
 This produces one model curve per requested variable, plus the persistence baseline if `plot_persistence: true`:
 
@@ -379,6 +446,8 @@ If evaluating a smoke checkpoint trained with the small debug architecture, use 
 Use `scripts/visualize_rollout_maps.py` to inspect ground truth, prediction, and bias maps for selected variables and lead times. The script uses Cartopy, so coastlines and country borders are drawn on every panel.
 
 ```bash
+cd /lustre/home/ziya/GNN/GraphWeather5p625
+
 python scripts/visualize_rollout_maps.py \
   --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
   --config configs/gnn_5p625.yaml \
@@ -391,6 +460,24 @@ python scripts/visualize_rollout_maps.py \
   --variables z500 t2m msl t850 \
   --output_dir experiments/raw_5p625_full150/visualizations
 ```
+
+For a 2.5-degree checkpoint:
+
+```bash
+python scripts/visualize_rollout_maps.py \
+  --checkpoint experiments/raw_2p5_baseline_2p5/best_ckpt.tar \
+  --config configs/weather_dual_resolution.yaml \
+  --resolution_mode 2p5 \
+  --split valid \
+  --aggregate_mode sample \
+  --sample_index 0 \
+  --rollout_steps 10 \
+  --lead_times 1 3 5 10 \
+  --variables z500 t2m msl t850 \
+  --output_dir experiments/raw_2p5_baseline_2p5/visualizations
+```
+
+Map titles include the active mode and grid shape, for example `mode: 2p5 | grid: 72x144`.
 
 For a stage-specific checkpoint, point `--checkpoint` at that file:
 

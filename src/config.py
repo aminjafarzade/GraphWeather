@@ -7,11 +7,19 @@ from typing import Any, Optional
 
 import yaml
 
+from .resolution import apply_resolution_profile
+
 
 class YParams:
     """Small YAML config loader with KAI-style dot and dict access."""
 
-    def __init__(self, yaml_filename: str, config_name: str, print_params: bool = False):
+    def __init__(
+        self,
+        yaml_filename: str,
+        config_name: str,
+        print_params: bool = False,
+        resolution_mode: str | None = None,
+    ):
         self._yaml_filename = yaml_filename
         self._config_name = config_name
         self.params: dict[str, Any] = {}
@@ -26,9 +34,18 @@ class YParams:
             if value == "None":
                 value = None
             self.params[key] = value
-            setattr(self, key, value)
-            if print_params:
+        self.apply_resolution_mode(resolution_mode)
+        if print_params:
+            for key, value in self.params.items():
                 print(key, value)
+
+    def _sync_attrs(self) -> None:
+        for key, value in self.params.items():
+            setattr(self, key, value)
+
+    def apply_resolution_mode(self, resolution_mode: str | None = None) -> None:
+        self.params = apply_resolution_profile(self.params, cli_resolution_mode=resolution_mode)
+        self._sync_attrs()
 
     def __getitem__(self, key: str) -> Any:
         return self.params[key]
@@ -77,4 +94,3 @@ def setup_logging(rank: int = 0, log_file: Optional[str] = None) -> None:
         ch = logging.StreamHandler(sys.stdout)
         ch.setFormatter(formatter)
         root.addHandler(ch)
-
