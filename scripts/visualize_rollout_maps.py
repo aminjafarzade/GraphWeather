@@ -24,8 +24,12 @@ sys.path.insert(0, str(project_root))
 
 from src.config import YParams, setup_logging
 from src.data import ClimateNetCDFDataset, DataConfig
+from src.device import _resolve_device
+from src.features import RolloutFeatureBuilder, feature_metadata_matches
 from src.graph_bundle import load_graph_bundle
 from src.models import GraphWeatherModel
+from src.architecture import validate_checkpoint_architecture
+from src.target_handling import TargetHandling, target_handling_metadata_matches
 
 
 VARIABLE_METADATA: dict[str, dict[str, Any]] = {
@@ -41,6 +45,9 @@ VARIABLE_ALIASES: dict[str, list[str]] = {
     "t850": ["t850", "t_850", "t@850", "temperature_850"],
     "u500": ["u500", "u_500", "u@500", "u_wind_500", "zonal_wind_500"],
     "t2m": ["t2m", "2m_temperature", "temperature_2m", "t_2m"],
+    "tisr": ["tisr", "top_incoming_solar_radiation"],
+    "orog": ["orog", "orography", "geopotential_at_surface", "surface_geopotential"],
+    "lsm": ["lsm", "land_sea_mask", "land_mask"],
     "msl": [
         "msl",
         "mslp",
@@ -227,6 +234,45 @@ def _resolve_config_args(args: argparse.Namespace) -> tuple[str, str]:
         looks_like_yaml = args.config.endswith((".yaml", ".yml")) or Path(args.config).exists()
         if looks_like_yaml:
             yaml_path = args.config
+            if config_name is None:
+                if Path(args.config).name == "weather_dual_resolution.yaml":
+                    config_name = "raw"
+                elif Path(args.config).name == "weather_dual_resolution_l3.yaml":
+                    config_name = "raw_l3"
+                elif Path(args.config).name == "weather_dual_resolution_l3_stage_warmup_cosine.yaml":
+                    config_name = "raw_l3_stage_warmup_cosine"
+                elif Path(args.config).name == "weather_dual_resolution_l3_blocks3.yaml":
+                    config_name = "raw_l3_blocks3"
+                elif Path(args.config).name == "weather_dual_resolution_l3_heavy_unet.yaml":
+                    config_name = "raw_l3_heavy_unet"
+                elif Path(args.config).name == "weather_dual_resolution_l3_full_rollout.yaml":
+                    config_name = "raw_l3_full_rollout"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128.yaml":
+                    config_name = "raw_l3_hidden128"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden160.yaml":
+                    config_name = "raw_l3_hidden160"
+                elif Path(args.config).name == "weather_dual_resolution_l3_orog_tisr_fixed.yaml":
+                    config_name = "raw_l3_orog_tisr_fixed"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_orog_tisr_fixed.yaml":
+                    config_name = "raw_l3_hidden128_orog_tisr_fixed"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden160_orog_tisr_fixed.yaml":
+                    config_name = "raw_l3_hidden160_orog_tisr_fixed"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_dense_l3k24_fixed_orog.yaml":
+                    config_name = "raw_l3_hidden128_dense_l3k24_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_scalar_gated_skip_fixed_orog.yaml":
+                    config_name = "raw_l3_hidden128_scalar_gated_skip_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_scalar_gated_pooling_fixed_orog.yaml":
+                    config_name = "raw_l3_hidden128_scalar_gated_pooling_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_lead_conditioned_fixed_orog.yaml":
+                    config_name = "raw_l3_hidden128_lead_conditioned_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l4_ratio15_hidden128_fixed_orog.yaml":
+                    config_name = "raw_l4_ratio15_hidden128_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l4_hidden128_72_36_24_18_9_fixed_orog.yaml":
+                    config_name = "raw_l4_hidden128_72_36_24_18_9_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_spectral_loss_fixed_orog.yaml":
+                    config_name = "raw_l3_hidden128_spectral_loss_fixed_orog"
+                elif Path(args.config).name == "weather_dual_resolution_l3_hidden128_spectral_loss_w001_fixed_orog.yaml":
+                    config_name = "raw_l3_hidden128_spectral_loss_w001_fixed_orog"
         elif config_name is None:
             config_name = args.config
 
@@ -401,6 +447,11 @@ def _build_dataset(params: Any, split: str, rollout_steps: int) -> ClimateNetCDF
         rollout_steps=int(rollout_steps),
         batch_size=1,
         num_workers=0,
+        resolution_mode=str(_get(params, "resolution_mode", "5p625")),
+        expected_grid_shape=_get(params, "expected_grid_shape", _get(params, "grid_shape", None)),
+        return_metadata=bool((_get(params, "extra_features", {}) or {}).get("enabled", False))
+        if isinstance(_get(params, "extra_features", {}) or {}, dict)
+        else False,
     )
     return ClimateNetCDFDataset(data_cfg, _split_data_path(params, split), train=False)
 
@@ -666,17 +717,91 @@ def _apply_coordinate_orders(seq: np.ndarray, lat_order: np.ndarray, lon_order: 
     return seq[..., lat_order, :][..., lon_order]
 
 
-def _build_model(params: Any, dataset: ClimateNetCDFDataset, inp: torch.Tensor, target_seq: torch.Tensor, device: torch.device) -> GraphWeatherModel:
+def _apply_checkpoint_architecture_hints(params: Any, checkpoint_path: str) -> None:
+    """Use checkpoint-recorded graph settings when they are more specific than the config."""
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    except Exception as exc:
+        logging.warning("Could not inspect checkpoint architecture metadata before model build: %s", exc)
+        return
+    if not isinstance(checkpoint, dict):
+        return
+    metadata = dict(checkpoint.get("metadata", {}) or {})
+    raw_level_k = metadata.get("level_k_neighbors", None)
+    if raw_level_k is not None:
+        level_k = [int(x) for x in raw_level_k]
+        current_level_k = [int(x) for x in _get(params, "level_k_neighbors", [])]
+        if level_k and current_level_k != level_k:
+            params["level_k_neighbors"] = level_k
+            model_cfg = dict(_get(params, "model", {}) or {})
+            model_cfg["level_k_neighbors"] = level_k
+            params["model"] = model_cfg
+            if len(level_k) > 3:
+                params["l3_k_neighbors"] = int(level_k[3])
+            logging.warning(
+                "Adjusted visualization config level_k_neighbors from checkpoint metadata: %s -> %s",
+                current_level_k,
+                level_k,
+            )
+
+    graph_path = str(metadata.get("graph_path", "") or "").strip()
+    if graph_path:
+        resolved_graph_path = _resolve_path(graph_path)
+        if os.path.exists(resolved_graph_path) and str(_get(params, "graph_path", "")) != resolved_graph_path:
+            logging.warning(
+                "Adjusted visualization graph_path from checkpoint metadata: %s -> %s",
+                _get(params, "graph_path", ""),
+                resolved_graph_path,
+            )
+            params["graph_path"] = resolved_graph_path
+
+
+def _model_input_channel_count(params: Any, data_input_channels: int) -> int:
+    lead_cfg = dict(_get(params, "lead_conditioning", {}) or {})
+    lead_added = int(lead_cfg.get("added_input_channels", 0))
+    expected = int(data_input_channels) + lead_added
+    configured = _get(params, "input_channels", None)
+    if configured is None:
+        return expected
+    configured_int = int(configured)
+    if configured_int != expected:
+        logging.warning(
+            "Configured input_channels=%d but sample has %d channels and lead conditioning adds %d; using %d.",
+            configured_int,
+            int(data_input_channels),
+            lead_added,
+            expected,
+        )
+        return expected
+    return configured_int
+
+
+def _build_model(
+    params: Any,
+    dataset: ClimateNetCDFDataset,
+    inp: torch.Tensor,
+    target_seq: torch.Tensor,
+    device: torch.device,
+    feature_builder: RolloutFeatureBuilder | None = None,
+) -> GraphWeatherModel:
     graph = load_graph_bundle(params.graph_path, map_location="cpu").to(device)
+    graph_mode = graph.metadata.get("resolution_mode", None)
+    active_mode = str(_get(params, "resolution_mode", "5p625"))
+    if graph_mode is None and active_mode != "5p625":
+        raise ValueError(f"Graph cache has no resolution metadata and cannot be used for {active_mode}.")
+    if graph_mode is not None and str(graph_mode) != active_mode:
+        raise ValueError(f"Graph cache mode {graph_mode} does not match active mode {active_mode}.")
     model = GraphWeatherModel(
         graph=graph,
         grid_shape=(int(dataset.img_shape_x), int(dataset.img_shape_y)),
-        input_channels=int(inp.shape[0]),
+        input_channels=_model_input_channel_count(params, int(inp.shape[0])),
         output_channels=int(target_seq.shape[1]),
         n_history=int(params.n_history),
         hidden_dim=int(_get(params, "hidden_dim", 96)),
         edge_dim=int(_get(params, "edge_dim", 6)),
         heads=int(_get(params, "num_heads", 4)),
+        k_neighbors=int(_get(params, "k_neighbors", 8)),
+        level_k_neighbors=_get(params, "level_k_neighbors", None),
         encoder_blocks=int(_get(params, "encoder_blocks", 1)),
         decoder_blocks=int(_get(params, "decoder_blocks", 1)),
         l0_blocks=int(_get(params, "l0_blocks", 2)),
@@ -684,28 +809,133 @@ def _build_model(params: Any, dataset: ClimateNetCDFDataset, inp: torch.Tensor, 
         l2_blocks=int(_get(params, "l2_blocks", 1)),
         l1_refine_blocks=int(_get(params, "l1_refine_blocks", 1)),
         l0_refine_blocks=int(_get(params, "l0_refine_blocks", 1)),
+        num_graph_levels=int(_get(params, "num_graph_levels", 3)),
+        use_l3=bool(_get(params, "use_l3", False)),
+        l3_blocks=int(_get(params, "l3_blocks", 1)),
+        l4_blocks=int(_get(params, "l4_blocks", 1)),
+        l3_refine_after_l4_blocks=int(_get(params, "l3_refine_after_l4_blocks", 1)),
+        l2_refine_after_l3_blocks=int(_get(params, "l2_refine_after_l3_blocks", 1)),
+        skip_fusion=dict(_get(params, "skip_fusion", {}) or {}),
+        pooling=dict(_get(params, "pooling", {}) or {}),
+        l0_refine=dict(_get(params, "l0_refine", {}) or {}),
+        lead_conditioning=dict(_get(params, "lead_conditioning", {}) or {}),
+        aux_feature_dim=0 if feature_builder is None else int(feature_builder.aux_feature_dim),
     ).to(device)
     return model
 
 
-def _load_checkpoint(model: GraphWeatherModel, checkpoint_path: str, device: torch.device) -> dict[str, Any]:
+def _load_checkpoint(
+    model: GraphWeatherModel,
+    checkpoint_path: str,
+    device: torch.device,
+    feature_builder: RolloutFeatureBuilder | None = None,
+    target_handler: TargetHandling | None = None,
+) -> dict[str, Any]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state = checkpoint.get("model_state", checkpoint.get("state_dict", checkpoint))
     cleaned = OrderedDict()
     for key, value in state.items():
         cleaned[key[7:] if key.startswith("module.") else key] = value
-    model.load_state_dict(cleaned, strict=True)
+    metadata = dict(checkpoint.get("metadata", {}))
+    validate_checkpoint_architecture(metadata, model)
+    if feature_builder is not None:
+        active = feature_builder.checkpoint_metadata(
+            base_input_channels=int(model.adapter.input_channels),
+            total_input_channels=int(model.adapter.input_channels + feature_builder.aux_feature_dim),
+        )
+        ok, reason = feature_metadata_matches(active, metadata)
+        if not ok:
+            raise RuntimeError(f"Checkpoint extra-feature configuration mismatch: {reason}")
+    if target_handler is not None:
+        ok, reason = target_handling_metadata_matches(target_handler.metadata, metadata)
+        if not ok:
+            if "target_handling" in metadata:
+                raise RuntimeError(f"Checkpoint target-handling configuration mismatch: {reason}")
+            if target_handler.enabled:
+                logging.warning(
+                    "Visualizing legacy checkpoint without target-handling metadata using active target handling. "
+                    "Model weights are unchanged."
+                )
+    use_delta_normalization = bool(metadata.get("use_delta_normalization", False))
+    if use_delta_normalization and ("delta_mean" not in cleaned or "delta_std" not in cleaned):
+        raise RuntimeError("Delta normalization is enabled but checkpoint lacks delta_mean/delta_std buffers.")
+    missing, unexpected = model.load_state_dict(cleaned, strict=False)
+    allowed_missing = set() if use_delta_normalization else {"delta_mean", "delta_std"}
+    bad_missing = [key for key in missing if key not in allowed_missing]
+    if bad_missing or unexpected:
+        raise RuntimeError(f"Checkpoint model_state mismatch. Missing={bad_missing}; unexpected={list(unexpected)}")
+    model.use_delta_normalization = use_delta_normalization
+    model.delta_norm_center = bool(metadata.get("delta_norm_center", False))
     model.eval()
     return checkpoint
 
 
+def _validate_checkpoint_resolution(checkpoint: dict[str, Any], params: Any) -> None:
+    metadata = dict(checkpoint.get("metadata", {}))
+    active_mode = str(_get(params, "resolution_mode", "5p625"))
+    checkpoint_mode = metadata.get("resolution_mode", None)
+    if checkpoint_mode is None:
+        if active_mode == "5p625":
+            logging.warning("Checkpoint has no resolution metadata; treating it as legacy 5p625.")
+            return
+        raise RuntimeError(f"Cannot visualize a legacy checkpoint without resolution metadata in {active_mode} mode.")
+    if str(checkpoint_mode) != active_mode:
+        raise RuntimeError(f"Cannot visualize a {checkpoint_mode} checkpoint in {active_mode} mode.")
+
+
+def _metadata_step_tensor(metadata: dict[str, Any], key: str, step: int, device: torch.device) -> torch.Tensor | None:
+    value = metadata.get(key)
+    if not torch.is_tensor(value):
+        return None
+    value = value.to(device=device)
+    if value.dim() == 1:
+        value = value.unsqueeze(0)
+    return value[:, int(step) : int(step) + 1]
+
+
 @torch.no_grad()
-def rollout_predictions(model: GraphWeatherModel, inp: torch.Tensor, rollout_steps: int, device: torch.device) -> torch.Tensor:
+def rollout_predictions(
+    model: GraphWeatherModel,
+    inp: torch.Tensor,
+    rollout_steps: int,
+    device: torch.device,
+    feature_builder: RolloutFeatureBuilder | None = None,
+    target_handler: TargetHandling | None = None,
+    target_seq: torch.Tensor | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> torch.Tensor:
     model.eval()
     previous, current = model.adapter.extract_two_steps(inp[None, ...].to(device, dtype=torch.float32))
+    target_seq_device = None if target_seq is None else target_seq[None, ...].to(device, dtype=torch.float32)
+    metadata = metadata or {}
     preds: list[torch.Tensor] = []
-    for _ in range(int(rollout_steps)):
-        pred = model.forward_steps(previous, current)
+    initial_state = current
+    for step in range(int(rollout_steps)):
+        target_norm = target_seq_device[:, step] if target_seq_device is not None and target_seq_device.shape[1] > step else None
+        aux = None
+        if feature_builder is not None:
+            aux = feature_builder.build_step_features(
+                current=current,
+                target_norm=target_norm,
+                target_dayofyear=_metadata_step_tensor(metadata, "target_dayofyear", step, device),
+                target_days_in_year=_metadata_step_tensor(metadata, "target_days_in_year", step, device),
+                step_idx=0,
+            )
+        if aux is None:
+            pred = model.forward_steps(previous, current, lead=step + 1)
+        else:
+            pred = model.forward_steps(previous, current, aux_features=aux, lead=step + 1)
+        if feature_builder is not None and target_norm is not None:
+            pred = feature_builder.apply_overrides(pred, current=current, target_norm=target_norm)
+        if target_handler is not None:
+            pred = target_handler.apply(
+                pred_next=pred,
+                current_state=current,
+                initial_state=initial_state,
+                target_sequence=target_seq_device,
+                target_norm=target_norm,
+                lead=step + 1,
+            )
         preds.append(pred[0].detach().cpu())
         next_current = current.clone()
         next_current[:, : model.output_channels] = pred
@@ -719,6 +949,14 @@ def _target_sequence(target: torch.Tensor) -> torch.Tensor:
     if target.dim() == 4:
         return target
     raise ValueError(f"Expected target [C,H,W] or [S,C,H,W], got {tuple(target.shape)}")
+
+
+def _unpack_sample(sample: Any) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+    if isinstance(sample, dict):
+        metadata = {key: value for key, value in sample.items() if key not in {"input", "target"}}
+        return sample["input"], sample["target"], metadata
+    inp, target = sample
+    return inp, target, {}
 
 
 def _denormalize_if_needed(
@@ -1029,6 +1267,8 @@ def plot_variable_rollout_maps(
     same_scale_across_leads: bool,
     add_cyclic: bool,
     avg_sample_rmse: np.ndarray | None = None,
+    resolution_mode: str = "5p625",
+    grid_shape: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     rows = len(lead_times)
     fig = plt.figure(
@@ -1141,9 +1381,12 @@ def plot_variable_rollout_maps(
 
     checkpoint_stem = Path(checkpoint_path).stem
     if show_titles:
+        grid_text = ""
+        if grid_shape is not None:
+            grid_text = f" | grid: {int(grid_shape[0])}x{int(grid_shape[1])}"
         fig.suptitle(
             f"Variable: {variable_label} | {aggregate_label} | checkpoint: {checkpoint_stem} | "
-            f"fixed rollout {rollout_steps} days",
+            f"mode: {resolution_mode}{grid_text} | fixed rollout {rollout_steps} days",
             fontsize=13,
         )
     fig.subplots_adjust(
@@ -1182,10 +1425,21 @@ def _load_sample_sequences(
     denormalize: bool,
     lat_order: np.ndarray,
     lon_order: np.ndarray,
+    feature_builder: RolloutFeatureBuilder | None = None,
+    target_handler: TargetHandling | None = None,
 ) -> tuple[np.ndarray, np.ndarray, bool]:
-    inp, target = dataset[int(sample_index)]
+    inp, target, metadata = _unpack_sample(dataset[int(sample_index)])
     target_seq = _target_sequence(target)
-    pred_seq = rollout_predictions(model, inp, rollout_steps, device).numpy()
+    pred_seq = rollout_predictions(
+        model,
+        inp,
+        rollout_steps,
+        device,
+        feature_builder=feature_builder,
+        target_handler=target_handler,
+        target_seq=target_seq,
+        metadata=metadata,
+    ).numpy()
     pred_seq, gt_seq, denormalized = _denormalized_sequences(pred_seq, target_seq, params, denormalize)
     pred_seq = _apply_coordinate_orders(pred_seq, lat_order, lon_order)
     gt_seq = _apply_coordinate_orders(gt_seq, lat_order, lon_order)
@@ -1204,6 +1458,8 @@ def _aggregate_year_mean(
     lat_order: np.ndarray,
     lon_order: np.ndarray,
     max_batches: int | None,
+    feature_builder: RolloutFeatureBuilder | None = None,
+    target_handler: TargetHandling | None = None,
 ) -> tuple[dict[str, dict[str, Any]], bool, int]:
     n_samples = len(dataset)
     if max_batches is not None and max_batches > 0:
@@ -1224,9 +1480,18 @@ def _aggregate_year_mean(
 
     denorm_all = True
     for sample_idx in range(n_samples):
-        inp, target = dataset[sample_idx]
+        inp, target, metadata = _unpack_sample(dataset[sample_idx])
         target_seq = _target_sequence(target)
-        pred_seq = rollout_predictions(model, inp, rollout_steps, device).numpy()
+        pred_seq = rollout_predictions(
+            model,
+            inp,
+            rollout_steps,
+            device,
+            feature_builder=feature_builder,
+            target_handler=target_handler,
+            target_seq=target_seq,
+            metadata=metadata,
+        ).numpy()
         pred_seq, gt_seq, denormalized = _denormalized_sequences(pred_seq, target_seq, params, denormalize)
         denorm_all = denorm_all and denormalized
         pred_seq = _apply_coordinate_orders(pred_seq, lat_order, lon_order)
@@ -1298,6 +1563,7 @@ def main() -> None:
     parser.add_argument("--config", default=None, type=str, help="Config YAML path or config section name.")
     parser.add_argument("--yaml_config", default=None, type=str, help="Explicit YAML config path.")
     parser.add_argument("--config_name", default=None, type=str, help="YAML section name, default raw_5p625.")
+    parser.add_argument("--resolution_mode", default=None, type=str, help="5p625 or 2p5; overrides YAML resolution_mode.")
     parser.add_argument("--split", default="valid", choices=["train", "valid", "test"])
     parser.add_argument("--aggregate_mode", default="sample", choices=["sample", "year_mean"])
     parser.add_argument("--sample_index", default=0, type=int)
@@ -1333,7 +1599,11 @@ def main() -> None:
     args = parser.parse_args()
 
     yaml_path, config_name = _resolve_config_args(args)
-    params = YParams(yaml_path, config_name)
+    params = YParams(yaml_path, config_name, resolution_mode=args.resolution_mode)
+    if args.checkpoint:
+        checkpoint_path_for_hints = _resolve_path(args.checkpoint)
+        if os.path.exists(checkpoint_path_for_hints):
+            _apply_checkpoint_architecture_hints(params, checkpoint_path_for_hints)
     rollout_steps = int(args.rollout_steps)
     lead_times = [int(x) for x in _parse_items([str(v) for v in args.lead_times])]
     if not lead_times:
@@ -1394,7 +1664,7 @@ def main() -> None:
     if args.use_cartopy:
         _load_cartopy()
 
-    device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device = _resolve_device(args.device or "cuda", local_rank=0)
     logging.info("Using device: %s", device)
     if args.aggregate_mode == "sample" and (args.sample_index < 0 or args.sample_index >= len(dataset)):
         raise IndexError(f"sample_index={args.sample_index} is outside split length {len(dataset)}")
@@ -1415,10 +1685,40 @@ def main() -> None:
         _write_json(output_dir / "lat_lon_debug.json", lat_lon_debug)
 
     model_sample_idx = int(args.sample_index) if args.aggregate_mode == "sample" else 0
-    inp, target = dataset[model_sample_idx]
+    inp, target, _ = _unpack_sample(dataset[model_sample_idx])
     target_seq = _target_sequence(target)
-    model = _build_model(params, dataset, inp, target_seq, device)
-    checkpoint = _load_checkpoint(model, checkpoint_path, device)
+    model_input_channels = _model_input_channel_count(params, int(inp.shape[0]))
+    feature_graph = load_graph_bundle(params.graph_path, map_location="cpu").to(device)
+    feature_builder = RolloutFeatureBuilder.from_params(
+        params,
+        graph=feature_graph,
+        channel_names=channel_names,
+        out_channels=list(params.out_channels),
+        output_means=None if stats_info is None else stats_info.get("means"),
+        output_stds=None if stats_info is None else stats_info.get("stds"),
+        logger=logging,
+    )
+    feature_builder.log_startup(
+        base_input_channels=model_input_channels,
+        total_input_channels=int(model_input_channels + feature_builder.aux_feature_dim),
+        output_channels=int(target_seq.shape[1]),
+    )
+    target_handler = TargetHandling.from_params(
+        params,
+        channel_names=channel_names,
+        out_channels=list(params.out_channels),
+        logger=logging,
+    )
+    target_handler.log_startup(output_channels=int(target_seq.shape[1]))
+    model = _build_model(params, dataset, inp, target_seq, device, feature_builder=feature_builder)
+    checkpoint = _load_checkpoint(
+        model,
+        checkpoint_path,
+        device,
+        feature_builder=feature_builder,
+        target_handler=target_handler,
+    )
+    _validate_checkpoint_resolution(checkpoint, params)
     metadata = dict(checkpoint.get("metadata", {}))
     logging.info(
         "Loaded checkpoint: %s | epoch=%s | train_rollout_steps=%s",
@@ -1437,6 +1737,8 @@ def main() -> None:
         "max_batches": args.max_batches,
         "rollout_steps": rollout_steps,
         "lead_times": lead_times,
+        "resolution_mode": str(_get(params, "resolution_mode", "5p625")),
+        "grid_shape": [int(dataset.img_shape_x), int(dataset.img_shape_y)],
         "denormalize_requested": bool(args.denormalize),
         "denormalized": None,
         "convert_z_to_height": bool(args.convert_z_to_height),
@@ -1454,6 +1756,8 @@ def main() -> None:
             "use_cartopy": bool(args.use_cartopy),
             "add_cyclic": bool(args.add_cyclic),
         },
+        "features": feature_builder.metadata,
+        "target_handling": target_handler.metadata,
         "variables": {},
     }
 
@@ -1468,6 +1772,8 @@ def main() -> None:
             denormalize=bool(args.denormalize),
             lat_order=lat_order,
             lon_order=lon_order,
+            feature_builder=feature_builder,
+            target_handler=target_handler,
         )
         if args.denormalize and not denormalized:
             logging.warning("Denormalization was requested but could not be applied; plotting normalized values.")
@@ -1488,6 +1794,8 @@ def main() -> None:
             lat_order=lat_order,
             lon_order=lon_order,
             max_batches=args.max_batches,
+            feature_builder=feature_builder,
+            target_handler=target_handler,
         )
         if args.denormalize and not denormalized:
             logging.warning("Denormalization was requested but could not be applied for every sample; plotting normalized values.")
@@ -1548,6 +1856,8 @@ def main() -> None:
             same_scale_across_leads=bool(args.same_scale_across_leads),
             add_cyclic=bool(args.add_cyclic),
             avg_sample_rmse=avg_sample_rmse,
+            resolution_mode=str(_get(params, "resolution_mode", "5p625")),
+            grid_shape=(int(dataset.img_shape_x), int(dataset.img_shape_y)),
         )
         metadata_payload["variables"][str(variable["name"])] = {
             "label": variable["label"],

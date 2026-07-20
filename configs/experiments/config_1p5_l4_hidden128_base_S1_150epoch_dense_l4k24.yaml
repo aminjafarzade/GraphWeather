@@ -1,0 +1,493 @@
+# 1.5 degree L4 (5-level) hidden-128 S1 base, 150 epochs of single-step training.
+# Identical to the 150-epoch sibling of the 100-epoch config except max_epochs and
+# rollout_stage_epochs; the cosine stretches over 150 epochs automatically.
+# Pairs with config_1p5_l4_hidden128_dense_l4k24_curriculum_S2toS10_3ep_initckpt_s1_150ep.yaml
+#
+# Rollout-step checkpointing is OFF (both flags). This stage is single-step, so peak is
+# only 7.11 GB at batch 4 and fits anywhere; the batch reduction is needed by the
+# curriculum stage, not here.
+#
+# EMA of the weights is ON (decay 0.999). Validation, best-checkpoint selection and the
+# saved model_state all use the EMA weights; the live training weights are kept in the
+# checkpoint under ema_live_model_state so resume stays exact (src/trainer.py _ema_update,
+# _ema_swap_in, _ema_swap_out).
+# Decay sizing: the effective batch is 12, so an epoch is ~1120 optimizer steps in the base
+# and ~1092 in the curriculum. decay 0.999 averages over ~1000 steps, i.e. just under one
+# epoch - long enough to smooth, short enough that after a curriculum stage transition
+# (3276 steps per stage) the EMA has re-converged to the new horizon well before the stage
+# ends.
+s1only_1p5_l4_hidden128_base_150epoch_dense_l4k24:
+  lr: 0.0001
+  min_lr: 1.0e-06
+  weight_decay: 0.0001
+  scheduler: CosineAnnealingLR
+  max_epochs: 150
+  max_train_batches: null
+  max_valid_batches: null
+  batch_size: 4
+  gradient_accumulation_steps: 3
+  num_data_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  enable_amp: true
+  amp_dtype: auto_bf16_fp16
+  max_gradient_norm: 0.5
+  log_cuda_memory: true
+  experiment_name: s1only_1p5_l4_hidden128_base_150epoch_dense_l4k24
+  run_name: s1only_1p5_l4_hidden128_base_150epoch_dense_l4k24
+  resolution_mode: 1p5
+  nettype: graph_weather
+  target: default
+  auto_build_graph: true
+  hidden_dim: 128
+  edge_dim: 6
+  num_heads: 4
+  k_neighbors: 8
+  level_k_neighbors:
+  - 8
+  - 8
+  - 8
+  - 8
+  - 24
+  graph_connectivity_strategy: hybrid_row_aware_knn
+  row_aware_knn:
+    enabled: true
+    interior_neighbors_from_north_row: 1
+    interior_neighbors_from_south_row: 1
+    polar_neighbors_from_adjacent_row: 2
+  encoder_blocks: 1
+  decoder_blocks: 1
+  skip_fusion:
+    type: default
+    init_scale: 1.0
+    max_scale: 2.0
+  lead_conditioning:
+    enabled: false
+    type: none
+    max_lead: 0
+    added_input_channels: 0
+  model:
+    input_channels: 134
+    output_channels: 67
+    hidden_dim: 128
+    num_heads: 4
+    k_neighbors: 8
+    level_k_neighbors:
+    - 8
+    - 8
+    - 8
+    - 8
+    - 24
+    use_l3: true
+    num_graph_levels: 5
+    l0_blocks: 2
+    l1_blocks: 2
+    l2_blocks: 1
+    l3_blocks: 1
+    l2_refine_after_l3_blocks: 1
+    l1_refine_blocks: 1
+    l0_refine_blocks: 1
+    skip_fusion:
+      type: default
+      init_scale: 1.0
+      max_scale: 2.0
+    lead_conditioning:
+      enabled: false
+      type: none
+      max_lead: 0
+      added_input_channels: 0
+    hierarchy_type: standard
+    use_l4_ratio15: false
+    head_dim: 32
+    pooling:
+      type: default
+      init_scale: 1.0
+      max_scale: 2.0
+      mean_type: mean
+      include_max: true
+    use_l4: true
+    l4_blocks: 1
+    l3_refine_after_l4_blocks: 1
+  graph_gradient_weight: 0.0
+  dt: 1
+  n_history: 1
+  max_rollout_steps: 10
+  rollout_schedule:
+  - 1
+  rollout_stage_epochs:
+  - 150
+  valid_rollout_steps: 1
+  validate_with_train_rollout: false
+  eval_rollout_steps:
+  - 1
+  trainable_scope: all
+  checkpoint_metric: valid_S1_final
+  checkpoint_mode: min
+  stage_checkpoint_metric_mode: final_horizon
+  load_only_current_rollout: true
+  single_pass_multi_horizon_validation: true
+  training:
+    rollout_mode: fixed
+    load_only_current_rollout: true
+    random_rollout:
+      min_horizon: 1
+      max_horizon: 1
+      distribution: uniform_integer
+      loss_type: all_steps_mean
+      final_step_weight: 0.0
+      detach_between_steps: false
+    fixed_train_rollout_steps: 1
+    rollout_loss_weights: uniform
+    activation_checkpointing: false
+    checkpoint_rollout_steps: false
+    scheduled_rollout:
+      phases: []
+  lr_schedule_type: warmup_cosine
+  warmup_epochs: 3
+  warmup_start_factor: 0.1
+  use_delta_normalization: true
+  delta_stats_path: data/stats/kai_1p5_delta_stats.npz
+  recompute_delta_stats: false
+  delta_norm_center: false
+  delta_norm_eps: 1.0e-06
+  in_channels:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
+  - 36
+  - 37
+  - 38
+  - 39
+  - 40
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+  - 46
+  - 47
+  - 48
+  - 49
+  - 50
+  - 51
+  - 52
+  - 53
+  - 54
+  - 55
+  - 56
+  - 57
+  - 58
+  - 59
+  - 60
+  - 61
+  - 62
+  - 63
+  - 64
+  - 65
+  - 66
+  out_channels:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
+  - 36
+  - 37
+  - 38
+  - 39
+  - 40
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+  - 46
+  - 47
+  - 48
+  - 49
+  - 50
+  - 51
+  - 52
+  - 53
+  - 54
+  - 55
+  - 56
+  - 57
+  - 58
+  - 59
+  - 60
+  - 61
+  - 62
+  - 63
+  - 64
+  - 65
+  - 66
+  normalization: zscore
+  add_grid: false
+  N_grid_channels: 0
+  gridtype: sinusoidal
+  add_noise: false
+  noise_std: 0.0
+  crop_size_x: null
+  crop_size_y: null
+  roll: false
+  orography: false
+  orography_path: null
+  require_static_features: false
+  extra_features:
+    enabled: false
+    spatial:
+      lat_lon_sincos: false
+      orography: false
+      land_sea_mask: false
+    temporal:
+      dayofyear_sincos: false
+      use_target_time: true
+    known_forcings:
+      enabled: false
+      variables: []
+    static_handling:
+      copy_variables: []
+      exclude_loss_variables: []
+      override_prediction_with_known: []
+  target_handling:
+    enabled: true
+    copy_variables:
+    - orog
+    exclude_loss_variables:
+    - orog
+    known_future_variables: []
+  static_fields:
+    path: null
+    orography_name: orog
+    land_sea_mask_name: lsm
+  variable_metadata:
+    path: null
+  resolution_profiles:
+    1p5:
+      resolution_degrees: 1.5
+      grid_shape:
+      - 121
+      - 240
+      level_shapes:
+      - - 121
+        - 240
+      - - 61
+        - 120
+      - - 31
+        - 60
+      - - 16
+        - 30
+      - - 8
+        - 15
+      train_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/train
+      valid_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/valid
+      test_dataset_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/test
+      graph_path: /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_1p5_121x240_k8_levelk8-8-8-8-24_hybrid_row_aware_L4_v5.pt
+      global_means_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_mean.npy
+      global_stds_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_std.npy
+      delta_stats_path: data/stats/kai_1p5_delta_stats.npz
+      batch_size: 4
+      gradient_accumulation_steps: 3
+      max_gradient_norm: 0.5
+      enable_amp: true
+  exp_dir: runs
+  eval_checkpoint_path: null
+  eval_output_dir: null
+  eval_forecast_steps:
+  - 10
+  eval_fixed_rollout_steps: 10
+  eval_compare_stage_checkpoints: false
+  eval_stage_checkpoints:
+    1: best_ckpt_S1.tar
+  eval_global_best_checkpoint: best_ckpt.tar
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  n_initial_conditions: 5
+  climatology_path: null
+  compute_climatology: true
+  climatology_chunk_size: 128
+  eval_device: cuda
+  eval_plot_variables:
+  - z500
+  - t2m
+  - t850
+  - msl
+  - q700
+  - u850
+  eval_plot_format: png
+  plot_persistence: true
+  save_checkpoint: true
+  resume: true
+  diagnostics:
+    enabled: false
+    baseline_compare:
+      enabled: false
+      baseline_name: null
+      baseline_rollout_curve_csv: null
+      baseline_scalars_json: null
+  wandb:
+    enabled: true
+    project: GraphWeather5p625
+    entity: amin1jafarzade-kaist
+    run_name: s1only_1p5_l4_hidden128_base_150epoch_dense_l4k24
+    tags:
+    - s1_only
+    - one_step
+    - 1p5
+    - l4
+    - hidden128
+    - dense_l4k24
+    - 150epoch_base
+    - no_rollout_checkpointing
+    - ema
+  resolution_degrees: 1.5
+  grid_shape:
+  - 121
+  - 240
+  level_shapes:
+  - - 121
+    - 240
+  - - 61
+    - 120
+  - - 31
+    - 60
+  - - 16
+    - 30
+  - - 8
+    - 15
+  train_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/train
+  valid_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/valid
+  test_dataset_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/test
+  graph_path: graphs/graph_1p5_121x240_k8_levelk8-8-8-8-24_hybrid_row_aware_L4_v5.pt
+  global_means_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_mean.npy
+  global_stds_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_std.npy
+  hierarchy_type: standard
+  use_l4_ratio15: false
+  resolution: 1.5
+  expected_grid_shape:
+  - 121
+  - 240
+  node_counts:
+  - 29040
+  - 7320
+  - 1860
+  - 480
+  - 120
+  edge_counts:
+  - 232320
+  - 58560
+  - 14880
+  - 3840
+  - 2880
+  graph_format_version: 5
+  l3_k_neighbors: 8
+  input_channels: 134
+  output_channels: 67
+  use_l3: true
+  num_graph_levels: 5
+  l0_blocks: 2
+  l1_blocks: 2
+  l2_blocks: 1
+  l3_blocks: 1
+  l2_refine_after_l3_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  head_dim: 32
+  pooling:
+    type: default
+    init_scale: 1.0
+    max_scale: 2.0
+    mean_type: mean
+    include_max: true
+  use_l4: true
+  l4_blocks: 1
+  l3_refine_after_l4_blocks: 1
+  rollout_mode: fixed
+  fixed_train_rollout_steps: 1
+  rollout_loss_weights: uniform
+  activation_checkpointing: false
+  checkpoint_rollout_steps: false
+  random_rollout:
+    min_horizon: 1
+    max_horizon: 1
+    distribution: uniform_integer
+    loss_type: all_steps_mean
+    final_step_weight: 0.0
+    detach_between_steps: false
+  scheduled_rollout:
+    phases: []
+  device: cuda:0
+  name: s1only_1p5_l4_hidden128_base_100epoch_dense_l4k24
+  log_every_batches: 100
+  init_from_checkpoint: null
+  init_from_checkpoint_strict: false
+  l4_k_neighbors: 24
+  ema:
+    enabled: true
+    decay: 0.999

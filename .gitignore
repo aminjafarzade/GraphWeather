@@ -1,23 +1,75 @@
-.DS_Store
+# =============================================================================
+# GraphWeather5p625 — commit code + configs only. Exclude large/generated/
+# machine-specific artifacts (checkpoints, analysis, data, run logs).
+# =============================================================================
+
+# --- Trained models, checkpoints, and all per-experiment analysis outputs ----
+# (11 GB; produced by training / evaluation / diagnostics — regenerate locally)
+# ANCHORED to the repo root: a bare `experiments/` also matched configs/experiments/
+# and docs/experiments/ (source dirs that MUST be tracked). `/experiments` covers
+# both the old dir and the P4 compat symlink -> archive/experiments/.
+/experiments
+
+# --- Frozen legacy tree + release bundles (P4): moved under archive/, ignored.
+# archive/scripts/ and archive/configs/ hold small retired CODE and stay TRACKED.
+/archive/experiments/
+/archive/zips/
+
+# --- Fresh output roots for NEW runs (keep the empty dirs, exclude contents) --
+# New experiments land in runs/, comparison figures in comparisons/.
+runs/*
+!runs/.gitkeep
+comparisons/*
+!comparisons/.gitkeep
+
+# --- Experiment tracking / run logs ------------------------------------------
+wandb/
+runtime_diagnosis/
+# default local output dir for run_diagnostics.py (top-level only; keep src/diagnostics/)
+/diagnostics/
+logs/
+# captured stdout/stderr logs (e.g. dashboard/server.out, *.out run logs)
+*.out
+
+# --- Data & normalization stats (large; provide/regenerate locally) ----------
+# ERA5 data lives outside the repo; delta stats + climatology are rebuilt via
+# scripts/build_climatology.py and the delta-stats path in the config.
+# EXCEPTION: data/baselines/ is TRACKED (small KAI reference CSVs consumed by the
+# plotter + dashboard). Uses data/* (not data/) so the baselines dir can be
+# re-included — git cannot re-include under a fully-excluded parent dir.
+data/*
+!data/baselines/
+!data/baselines/*.csv
+
+# --- Graphs (auto-built at runtime via auto_build_graph: true) ----------------
+graphs/
+
+# --- Release/experiment bundles (hundreds of MB each; never commit) ----------
+*.zip
+*.tar
+*.tar.gz
+
+# --- Generated test baseline (machine-specific paths; regenerates on 1st run) -
+tests/config_resolved_goldens/
+
+# --- Python ------------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+.pytest_cache/
 
+# --- Environments ------------------------------------------------------------
 .venv/
 venv/
 env/
 
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Local datasets and generated training artifacts.
-*.nc
-*.nc4
-*.grib
-*.grib2
-*.zarr/
-*.npy
-experiments/**/ckpt.tar
-experiments/**/best_ckpt.tar
-experiments/**/last_ckpt.tar
-experiments/**/best_ckpt_*.tar
+# --- OS / editor -------------------------------------------------------------
+.DS_Store
+*.swp
+*~
+dashboard/data/

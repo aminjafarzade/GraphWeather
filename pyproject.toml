@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphweather"
+version = "0.1.0"
+description = "Direct-grid spherical Graph U-Net for weather forecasting (2p5 / 1p5 / 5p625 lat-lon grids)."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Ziya Zeynalov" }]
+
+# Runtime dependencies. Floors match the tested environment (graphweather-cu128,
+# Python 3.10); the upper bounds are major-version guards to avoid surprise
+# breaking releases, not exact pins. The GPU torch build should be installed
+# separately to match the local CUDA driver (see docs/pipeline.md).
+dependencies = [
+    "torch>=2.1,<3",
+    "numpy>=1.23,<3",
+    "pandas>=2.0,<3",
+    "scipy>=1.10,<2",
+    "PyYAML>=6.0,<7",
+    "netCDF4>=1.6,<2",
+    "tqdm>=4.66,<5",
+    "matplotlib>=3.7,<4",
+    "cartopy>=0.22,<1",
+    # Imported behind a try/except in trainer/evaluator/diagnostics (optional at
+    # import time). Listed here so `pip install` gives working run logging out of
+    # the box; move to an optional [wandb] extra if a no-wandb install is wanted.
+    "wandb>=0.16,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7,<9"]
+
+[project.urls]
+Homepage = "https://github.com/ZiyaZeynalov/GraphWeather5p625"
+
+# The import package is `src` (code uses `from src.<module> import ...`). Renaming
+# it to a top-level `graphweather` package is deferred (NEEDS-DECISION D2); until
+# then, `pip install -e .` makes `import src` work without sys.path hacks. The
+# dashboard is intentionally NOT packaged here — it stays a standalone app with
+# its own dashboard/requirements.txt and never imports src.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+# Put the repo root on sys.path so `import src` / `import dashboard` resolve when
+# running pytest from the repo root (tests also self-insert as a fallback).
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,2318 @@
+{
+  "ideas": [
+    {
+      "id": "zone-error-budget-2p5",
+      "title": "Where the day-10 error actually lives - and why it is not mostly polar",
+      "date": "2026-07-18",
+      "status": "measurement",
+      "verdict": "Claim under test: the polar cap dominates day-10 error, so fixing the graph at the poles is the largest available win. Assessment: PARTLY WRONG, and the correction matters for what to build next. An earlier reading of the year-mean bias maps put ~55% of day-10 area-weighted squared MSL error poleward of 60 degrees. That figure is the SYSTEMATIC BIAS budget, not the RMSE budget. Measured properly with scripts/evaluate_zone_rmse_dominance.py on both best 2.5 degree models, the poleward-of-60 share of day-10 area-weighted squared error is 32.4% for z500, 33.8% for msl, 43.0% for t2m and only 2.2% for q700 - over-represented against a 13.4% area share, but nowhere near a majority. The single largest band is the Southern Ocean storm track 60S-45S at 25.0% of z500 error on 7.9% of area. Decisive scoping fact: the bands where the lat-lon graph is worst are NOT the bands holding the error. Where the graph is severely degraded (|lat|>75, edges 2.70x shorter than at the equator) sits 7.3% of z500 error; where the most error sits (|lat| 45-60, 41.9%) the graph is only 1.23x degraded. Graph work is therefore worth doing but has a bounded ceiling, and it is not the biggest lever visible in this measurement. The biggest is a separate defect this run exposed: t2m is WORSE THAN PERSISTENCE at day 10 over the tropics and the Southern Ocean.",
+      "sections": [
+        {
+          "heading": "Evidence 1 - day-10 share of area-weighted squared error poleward of 60 degrees (both best models; zone_rmse_dominance_summary.csv)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable",
+                "h160 s1_200ep",
+                "h128 curriculum",
+                "Area share",
+                "Over-representation (h160)"
+              ],
+              "rows": [
+                [
+                  "t2m",
+                  "43.0%",
+                  "43.6%",
+                  "13.4%",
+                  "3.2x"
+                ],
+                [
+                  "msl",
+                  "33.8%",
+                  "33.2%",
+                  "13.4%",
+                  "2.5x"
+                ],
+                [
+                  "z500",
+                  "32.4%",
+                  "30.9%",
+                  "13.4%",
+                  "2.4x"
+                ],
+                [
+                  "t850",
+                  "27.3%",
+                  "26.5%",
+                  "13.4%",
+                  "2.0x"
+                ],
+                [
+                  "u850",
+                  "18.5%",
+                  "18.6%",
+                  "13.4%",
+                  "1.4x"
+                ],
+                [
+                  "q700",
+                  "2.2%",
+                  "2.1%",
+                  "13.4%",
+                  "0.2x"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "The two models agree to within 1.5 points on every variable. Capacity does not change WHERE the error lives - consistent with the separate finding that +55% width and a doubled S1 base left the polar share unmoved. q700 is the outlier in the other direction: moisture error is tropical, so a polar fix does nothing for it."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 2 - z500 day 10 by zone, h160 (share, over-representation, and skill vs persistence)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Zone",
+                "Area",
+                "Share of squared error",
+                "Ratio",
+                "Skill vs persistence"
+              ],
+              "rows": [
+                [
+                  "90S-75S",
+                  "1.7%",
+                  "3.10%",
+                  "1.82x",
+                  "0.520"
+                ],
+                [
+                  "75S-60S",
+                  "5.0%",
+                  "13.42%",
+                  "2.69x",
+                  "0.532"
+                ],
+                [
+                  "60S-45S",
+                  "7.9%",
+                  "24.96%",
+                  "3.14x",
+                  "0.556"
+                ],
+                [
+                  "45S-30S",
+                  "10.4%",
+                  "11.86%",
+                  "1.14x",
+                  "0.605"
+                ],
+                [
+                  "30S-15S",
+                  "12.1%",
+                  "2.07%",
+                  "0.17x",
+                  "0.597"
+                ],
+                [
+                  "15S-0",
+                  "12.9%",
+                  "0.31%",
+                  "0.02x",
+                  "0.491"
+                ],
+                [
+                  "0-15N",
+                  "12.9%",
+                  "0.30%",
+                  "0.02x",
+                  "0.484"
+                ],
+                [
+                  "15N-30N",
+                  "12.1%",
+                  "1.79%",
+                  "0.15x",
+                  "0.588"
+                ],
+                [
+                  "30N-45N",
+                  "10.4%",
+                  "9.36%",
+                  "0.90x",
+                  "0.611"
+                ],
+                [
+                  "45N-60N",
+                  "7.9%",
+                  "16.98%",
+                  "2.14x",
+                  "0.581"
+                ],
+                [
+                  "60N-75N",
+                  "5.0%",
+                  "11.70%",
+                  "2.34x",
+                  "0.587"
+                ],
+                [
+                  "75N-90N",
+                  "1.7%",
+                  "4.16%",
+                  "2.44x",
+                  "0.485"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "Read the last two columns together. The 60S-45S band carries the most error of any zone, but its skill against persistence (0.556) is among the BETTER scores in the table - the error is large there because the weather is large, not because the model is weak. The genuinely weak non-tropical zone is 75N-90N: 2.44x over-represented AND the lowest z500 skill outside the tropics (0.485). That Arctic cell is the clean model-weakness signal, and it is 4.2% of the budget."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 3 - the graph is worst exactly where the error is not (L0 of graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt, measured directly)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Band |lat|",
+                "Mean edge length",
+                "vs equator",
+                "Zonal edge share",
+                "Meridional reach per hop",
+                "Share of z500 day-10 error"
+              ],
+              "rows": [
+                [
+                  "0-15",
+                  "333.6 km",
+                  "1.00x",
+                  "25%",
+                  "208 km",
+                  "0.6%"
+                ],
+                [
+                  "15-30",
+                  "322.5 km",
+                  "1.03x",
+                  "25%",
+                  "208 km",
+                  "3.9%"
+                ],
+                [
+                  "30-45",
+                  "301.8 km",
+                  "1.11x",
+                  "25%",
+                  "208 km",
+                  "21.2%"
+                ],
+                [
+                  "45-60",
+                  "271.2 km",
+                  "1.23x",
+                  "35%",
+                  "181 km",
+                  "41.9%"
+                ],
+                [
+                  "60-75",
+                  "223.5 km",
+                  "1.49x",
+                  "56%",
+                  "122 km",
+                  "25.1%"
+                ],
+                [
+                  "75-90",
+                  "123.8 km",
+                  "2.70x",
+                  "75%",
+                  "69 km",
+                  "7.3%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "This is the table that should decide the graph roadmap. Degradation and error concentration are anti-correlated over the range that matters: the band holding 41.9% of z500 day-10 error is only 1.23x degraded, while the 2.70x-degraded band holds 7.3%. A fix that only reaches the true polar caps addresses at most 7.3% of the budget."
+            },
+            {
+              "type": "list",
+              "items": [
+                "Confirmed independently from the graph file: 288 pole-row nodes emit 2016 L0 edges and ZERO of them join the north pole row to the south pole row. Within the north pole row the largest longitude separation spanned by any edge is 7.5 degrees - a genuine over-the-pole link would join points about 180 degrees apart. There is no path over either pole.",
+                "L3 (the coarsest level, 162 nodes) reaches a maximum |lat| of exactly 80.00 degrees and has ZERO nodes poleward of 80 - the caps lose coarse-scale coverage entirely.",
+                "Upper bounds on what a perfect polar fix buys, from the shares above: eliminating ALL z500 error poleward of 75 degrees would cut global day-10 z500 RMSE by 3.7%; halving all error poleward of 60 degrees would cut it by 8.5%. For msl the same two bounds are 4.1% and 8.8%. These are ceilings, not forecasts."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 4 - the larger finding: t2m is worse than persistence over ocean",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable",
+                "Zone",
+                "Day-10 skill vs persistence",
+                "Share of that variable's error"
+              ],
+              "rows": [
+                [
+                  "t2m",
+                  "0-15N",
+                  "-0.121",
+                  "1.83%"
+                ],
+                [
+                  "t2m",
+                  "15S-0",
+                  "-0.113",
+                  "1.74%"
+                ],
+                [
+                  "t2m",
+                  "60S-45S",
+                  "-0.064",
+                  "5.04%"
+                ],
+                [
+                  "t2m",
+                  "45S-30S",
+                  "0.239",
+                  "6.16%"
+                ],
+                [
+                  "t2m",
+                  "30S-15S",
+                  "0.328",
+                  "5.09%"
+                ],
+                [
+                  "t850",
+                  "0-15N",
+                  "0.386",
+                  "1.14%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "Negative skill means the 10-day forecast is worse than simply holding the initial condition fixed. t2m over the tropical oceans and the Southern Ocean is in that regime. This is the signature of a missing lower boundary condition: over ocean, t2m is essentially SST-driven and nearly constant across 10 days, so persistence is very strong, and a model with no prescribed SST or sea-ice input has nothing to anchor it and drifts. This configuration has extra_features disabled and copies only orography, so no surface boundary field is prescribed forward in time."
+            },
+            {
+              "type": "list",
+              "items": [
+                "This is cheap to test relative to any graph change and does not touch the graph at all. The tree already carries a pending suggestion node for known-future forcings.",
+                "It also caps what graph work can achieve for t2m specifically: 43% of t2m error is poleward of 60 degrees, but sea ice - not graph topology - is the obvious candidate there for the same boundary-condition reason.",
+                "Caveat: negative skill against persistence is diagnostic of a missing anchor, not proof of one. It is consistent with several causes, including delta-normalisation behaviour over near-constant fields."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "The correction here is a change of METRIC, not a refutation of the earlier bias analysis. Both are true: systematic bias is far more polar-concentrated (~55%) than total squared error (~32% for z500). Bias is the part a structural fix is most likely to remove, so the RMSE share is arguably a pessimistic bound and the bias share an optimistic one. The honest range for what a perfect polar fix could deliver sits between them.",
+                "Part of the Antarctic signal is the ERA5 mean-sea-level-pressure-over-ice artifact: MSL is reduced to sea level through roughly 3 km of ice, so some of that error is in the target, not the model. No graph fixes it. The Arctic bands carry no such excuse.",
+                "The training loss and this evaluation are both cos(lat)-weighted, so the poles are already down-weighted on both sides. The shares above are AFTER that down-weighting, which is what makes 2.4x over-representation meaningful rather than an artifact of counting grid cells.",
+                "Skill vs persistence is a ratio against a baseline that itself varies by zone. A high skill score in the storm track does not mean the absolute error is acceptable there - it means the model beats a weak baseline by a lot, because persistence is very bad where weather moves fast.",
+                "Single seed, 51 initial conditions from one year (2018), one checkpoint per model."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/zone_rmse_dominance/zone_rmse_dominance_summary.csv (all h160 zone shares, area weights, over-representation ratios and skill scores)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/zone_rmse_dominance/zone_rmse_dominance_summary.csv (the h128 comparison column)",
+        "graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt (L0 lat_lon and edge_index: per-band edge lengths, zonal shares, meridional reach, the zero cross-pole count, and L3 polar coverage)",
+        "scripts/evaluate_zone_rmse_dominance.py (15-degree zone decomposition of area-weighted squared error)",
+        "runs/*/visualizations_dashboard/yearmean_msl_day10_bias.npy (the year-mean bias maps behind the earlier ~55% figure this entry corrects)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard for the h160 flagship (published artifact)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        },
+        {
+          "label": "Rasp et al. (2024) - WeatherBench 2, JAMES (area-weighted RMSE and ACC conventions used here)",
+          "url": "https://arxiv.org/abs/2308.15560"
+        }
+      ]
+    },
+    {
+      "id": "graph-cross-pole-edges",
+      "title": "Graph reconstruction 1 of 3 - stitch the two pole rows together",
+      "date": "2026-07-18",
+      "status": "idea",
+      "verdict": "Proposal: add edges across each pole so that nodes on opposite longitudes of the same pole row become graph neighbours. Assessment: the defect is real and confirmed - 288 pole-row nodes emit 2016 L0 edges and not one of them crosses a pole; the widest longitude gap any pole-row edge spans is 7.5 degrees, where a true over-the-pole link spans about 180. Two nodes at 88.75N on opposite meridians are about 275 km apart in physical space and dozens of hops apart in the graph, so a system crossing the pole is structurally invisible. But the payoff is BOUNDED AND SMALL: everything poleward of 75 degrees is 7.3% of day-10 z500 squared error, so even a perfect fix caps out near 3.7% global RMSE. Do it first anyway, because it is the cheapest change on the list, it is builder-only, it leaves the parameter count untouched, and it is unambiguously falsifiable.",
+      "sections": [
+        {
+          "heading": "What changes",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "src/graph_builder.py only: for each pole row, connect each node to the node(s) at longitude + 180 degrees (and optionally their immediate neighbours), so information can travel over the pole instead of around it.",
+                "No model change. Node count, edge feature dimension and parameter count are unchanged, so this is purely a connectivity edit and existing checkpoints remain shape-compatible.",
+                "Today the only polar knob is row_aware_knn.polar_neighbors_from_adjacent_row (currently 2), which forces a couple of links into the adjacent row. Nothing in the current config surface can create a cross-pole edge.",
+                "Write it to a NEW graph filename. Overwriting an existing graph path silently changes every run that references it and destroys comparability with the current baselines."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "What it can and cannot buy",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Region reached",
+                "Share of z500 day-10 squared error",
+                "Ceiling on global z500 RMSE"
+              ],
+              "rows": [
+                [
+                  "Polar caps only, |lat| > 75",
+                  "7.3%",
+                  "-3.7% if the error there went to zero"
+                ],
+                [
+                  "If it also helps 60-75",
+                  "+25.1%",
+                  "-8.5% only if error poleward of 60 were halved"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "The first row is the honest scope of this change on its own. The second row requires the benefit to propagate equatorward into the 60-75 band, which cross-pole edges alone should not do much for - that band's problem is anisotropy, not the missing pole crossing, and it is idea 2's target. Judge this experiment on polar-band RMSE from scripts/evaluate_zone_rmse_dominance.py, not on global RMSE, which may not move outside noise even if the fix works."
+            }
+          ]
+        },
+        {
+          "heading": "How to test it honestly",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Train a clean arm from scratch on the new graph rather than warm-starting from a checkpoint fitted to the old one. Weights load across graph versions because they are per-node and per-edge, which is exactly the trap: a warm-started run measures how fast the model unlearns the old topology and is biased toward it.",
+                "Use hidden 128 as the workhorse. It is 1.66x cheaper per epoch than hidden 160 and statistically tied with it at day 10, which is the horizon this change targets.",
+                "With rollout checkpointing off and the processor compiled, a full h128 arm (100-epoch base plus 27-epoch curriculum) is roughly 4 h rather than the 11.4 h it used to be, so a clean arm is affordable and there is no reason to compromise the comparison.",
+                "Primary metric: the 90S-75S and 75N-90N rows of the zone table, against 3.10% and 4.16% for z500 today. Secondary: whether msl polar skill improves, since msl is where the polar signal was first seen."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "The Antarctic half of the polar signal is partly the ERA5 mean-sea-level-pressure-over-ice artifact - the target itself is an extrapolation through about 3 km of ice. No graph change fixes that, so expect the Arctic to respond and the Antarctic to respond less.",
+                "The loss is cos(lat)-weighted, so pole rows carry roughly 2% of an equator row's weight. Adding capacity without adding incentive may produce little movement. If cross-pole edges underdeliver, test a reweighting before concluding the topology was not the problem.",
+                "A cross-pole edge joins points that are physically close but meteorologically joined only through the polar vortex. It is possible the model learns little from it even with capacity and incentive.",
+                "7.3% of the budget means a real success may still be invisible in global headline RMSE. Decide the evaluation metric before running, or the result will be arguable either way."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt (2016 pole-row edges, zero cross-pole, max 7.5 degree longitude span within the pole row)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/zone_rmse_dominance/zone_rmse_dominance_summary.csv (the 3.10% and 4.16% polar cap shares this idea targets)",
+        "src/graph_builder.py (row_aware_knn is the only polar connectivity control today; there is no cross-pole option)",
+        "src/losses.py LatitudeWeightedMSE (the cos-lat weighting behind the incentive caveat)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard (published artifact)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        }
+      ]
+    },
+    {
+      "id": "graph-azimuth-stratified-polar-knn",
+      "title": "Graph reconstruction 2 of 3 - azimuth-stratified neighbours from 45 degrees poleward",
+      "date": "2026-07-18",
+      "status": "idea",
+      "verdict": "Proposal: stop selecting neighbours by raw distance at high latitude. Instead partition the compass around each node into sectors and take the nearest neighbour in each, so every node keeps a roughly isotropic receptive field regardless of latitude. Assessment: this targets a larger and better-evidenced defect than idea 1. On a lat-lon grid, zonal spacing collapses toward the poles while meridional spacing stays fixed, so distance-ranked k-NN degenerates into a one-dimensional zonal ring: the same-row share of edges climbs from 25% at the equator to 56% at 60-75 degrees and 75% poleward of 75, while meridional reach per hop falls from 208 km to 122 km to 69 km. Crucially this reaches the 60-75 band, which holds 25.1% of day-10 z500 squared error - three and a half times more than the polar caps idea 1 addresses. Still builder-only and still parameter-count neutral. This is the graph change with the best ratio of reach to cost.",
+      "sections": [
+        {
+          "heading": "The degeneracy, measured (L0 of graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Band |lat|",
+                "Zonal edge share",
+                "Meridional reach per hop",
+                "Mean edge length",
+                "Share of z500 day-10 error"
+              ],
+              "rows": [
+                [
+                  "0-45",
+                  "25%",
+                  "208 km",
+                  "302-334 km",
+                  "25.7%"
+                ],
+                [
+                  "45-60",
+                  "35%",
+                  "181 km",
+                  "271 km",
+                  "41.9%"
+                ],
+                [
+                  "60-75",
+                  "56%",
+                  "122 km",
+                  "223 km",
+                  "25.1%"
+                ],
+                [
+                  "75-90",
+                  "75%",
+                  "69 km",
+                  "124 km",
+                  "7.3%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "A node at 60-75 degrees spends more than half its message-passing budget talking to nodes at its own latitude, and reaches only 122 km north-south per hop against 208 km at the equator. Whatever number of hops the processor has, the effective north-south receptive field shrinks with latitude. Azimuth stratification fixes that without changing k: it changes WHICH k neighbours are chosen, not how many. row_aware_knn already does a crude version of this by forcing one or two links into the adjacent rows; this generalises it and applies it continuously rather than only at the pole rows."
+            }
+          ]
+        },
+        {
+          "heading": "Why this is the better first real bet",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Reach: the 60-90 range it fixes carries 32.4% of day-10 z500 squared error and 33.8% of msl, against 7.3% and 8.0% for the polar caps alone.",
+                "It is still a graph-builder change with no model edit and no parameter change, so it costs one graph rebuild plus one clean training arm, roughly 4 h at hidden 128 with the speedups applied.",
+                "It composes with idea 1 rather than competing: stratification fixes the direction of the receptive field, cross-pole edges fix the topology hole at the very top. Build both into one graph once each is validated separately.",
+                "It is the one change that also touches the 45-60 band (41.9% of error) at its edges, where degradation is mild (1.23x) but not zero."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "The 45-60 band holds the most error and is only 1.23x degraded, so most of that 41.9% is probably NOT a graph problem at all - it is the storm track, where the weather is genuinely hardest. Skill vs persistence there is 0.556, among the better scores in the table. Do not expect this change to move the biggest band much.",
+                "Forcing isotropy costs something: a stratified neighbour may be considerably further away than the nearest one, so each node's messages carry less local information. There is a real chance of trading fine-scale skill at high latitude for directional coverage, and the mid-latitude bands could get slightly worse.",
+                "Choice of sector count is a free parameter with no principled default here. Too few sectors and the degeneracy survives; too many and every node is forced to talk to distant nodes. Expect to sweep it, which multiplies the experiment cost.",
+                "Same incentive caveat as idea 1: cos(lat) weighting means the loss barely sees the region this fixes.",
+                "The hierarchy inherits the anisotropy at every level and L3 has no nodes poleward of 80 degrees at all. Stratifying L0 alone leaves the coarse levels lat-lon; the coarse-scale polar gap is only closed by idea 3."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt (per-band zonal share, meridional reach and edge length, measured directly from L0 lat_lon and edge_index)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/zone_rmse_dominance/zone_rmse_dominance_summary.csv (the per-band error shares this idea is scoped against)",
+        "src/graph_builder.py (hybrid_row_aware_knn and the row_aware_knn settings this generalises)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard (published artifact)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        }
+      ]
+    },
+    {
+      "id": "graph-icosahedral-processor",
+      "title": "Graph reconstruction 3 of 3 - replace the lat-lon processor mesh with an icosahedral or HEALPix mesh",
+      "date": "2026-07-18",
+      "status": "idea",
+      "verdict": "Proposal: keep the lat-lon grid for input and output, but run message passing on a quasi-uniform spherical mesh - icosahedral as in GraphCast and Keisler, or HEALPix as in DLWP-HPX - with encoder and decoder mapping between the grid and the mesh. Assessment: this is the only option on the list that removes the anisotropy everywhere rather than patching it at high latitude, and the only one that fixes the coarse levels, where L3 currently has zero nodes poleward of 80 degrees. It is also by far the most expensive and the only one that genuinely breaks warm-starting, because the processor no longer operates on grid nodes. Recommendation: do NOT start here. Ideas 1 and 2 are cheap and they measure how much of the polar gap is topology at all. If they recover most of the polar deficit, this is not worth the rewrite; if they recover little, that is the evidence that justifies it.",
+      "sections": [
+        {
+          "heading": "What it fixes that the cheaper ideas cannot",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Uniform resolution at every level. The current hierarchy is four lat-lon coarsenings, so anisotropy is inherited all the way up and the coarsest level (162 nodes) reaches a maximum |lat| of exactly 80.00 degrees with nothing beyond it. Long-range polar information has no coarse path at all.",
+                "It removes the pole as a special case entirely: no pole rows, no cross-pole stitching, no sector heuristics. Ideas 1 and 2 are both patches on a coordinate singularity that a uniform mesh simply does not have.",
+                "It is what the published systems that beat this class of model actually do, so the approach is not speculative - only its payoff in this codebase is."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "What it costs",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Item",
+                "Impact"
+              ],
+              "rows": [
+                [
+                  "Encoder and decoder",
+                  "New grid-to-mesh and mesh-to-grid mapping; both must be written and tested"
+                ],
+                [
+                  "Warm-starting",
+                  "Genuinely broken - processor weights are tied to a different node set, unlike ideas 1 and 2"
+                ],
+                [
+                  "Existing checkpoints",
+                  "Not reusable for the processor; every comparison arm retrains from scratch"
+                ],
+                [
+                  "Diagnostics and visualisation",
+                  "Anything that assumes a 72x144 processor node layout needs revisiting"
+                ],
+                [
+                  "Risk",
+                  "Highest of the three; a large change evaluated against a baseline that is already strong"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "The 2.7x training speedup makes the retraining affordable - a clean hidden-128 arm is roughly 4 h - so compute is no longer the blocker. Implementation and debugging time is, and so is the risk of comparing a freshly-written mesh path against a well-tuned lat-lon path that has had many iterations of quiet fixes."
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "The measured error budget does not obviously demand this. Poleward of 60 degrees is 32.4% of day-10 z500 squared error; the band holding the most error (45-60, 41.9%) sits where the lat-lon graph is only 1.23x degraded and where the model already scores its best skill against persistence. A uniform mesh may deliver much less than its reputation suggests here.",
+                "Published icosahedral models differ from this one in many ways at once - training data, parameter count, loss, resolution, rollout schedule - so their success is not attributable to the mesh alone and should not be read as a forecast for this change in isolation.",
+                "A new mesh introduces its own artifacts. Icosahedral meshes have twelve pentagonal vertices; HEALPix has its own discontinuities at face boundaries. Trading a known, measured, localised defect for an unfamiliar one is a real risk on a model that currently works.",
+                "The interpolation at the encoder and decoder is itself lossy, and at 2.5 degrees the grid is coarse enough that grid-to-mesh interpolation error may be a meaningful fraction of what the mesh is supposed to save."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt (L3 has 162 nodes and a maximum |lat| of exactly 80.00 degrees, with zero nodes poleward of 80)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/zone_rmse_dominance/zone_rmse_dominance_summary.csv (the error budget this change would have to justify)",
+        "src/models.py and src/graph_builder.py (the grid-node processor and lat-lon hierarchy this would replace)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard (published artifact)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        },
+        {
+          "label": "Lam et al. (2023) - GraphCast: Learning skillful medium-range global weather forecasting, Science 382 (icosahedral multimesh)",
+          "url": "https://arxiv.org/abs/2212.12794"
+        },
+        {
+          "label": "Keisler (2022) - Forecasting Global Weather with Graph Neural Networks (icosahedral GNN)",
+          "url": "https://arxiv.org/abs/2202.07575"
+        },
+        {
+          "label": "Karlbauer et al. (2024) - DLWP-HPX: Advancing Parsimonious Deep Learning Weather Prediction Using the HEALPix Mesh, JAMES",
+          "url": "https://arxiv.org/abs/2311.06253"
+        }
+      ]
+    },
+    {
+      "id": "training-speed-levers",
+      "title": "Training is ~2.7x slower than it needs to be",
+      "date": "2026-07-18",
+      "status": "measurement",
+      "verdict": "Claim: the 27-epoch hidden-160 curriculum run cost 12.95 h of wall time and roughly 2.7x of that is recoverable without touching the optimisation recipe, because two execution settings are silently wrong. Assessment: the two mechanisms are confirmed by direct reading of the repo's own code, and the speedup by direct benchmark through the repo's Trainer rather than by estimate - before any lever is pulled, the benchmark harness reproduces the production run's logged peak memory (3.49 GB benchmarked against 3.497509 GB logged at S10) and its logged throughput. Rollout-step checkpointing was paying a full extra forward pass for memory nobody needed (3.5 GB peak on a 46 GB card), and torch.compile as previously written compiled nothing at all because the hot path calls model.forward_steps(), which an OptimizedModule does not intercept. Turning both off/on correctly gives 0.8471 -> 0.3926 s per micro-batch on the L40S and 0.5992 -> 0.3125 s on the 97 GB card; a same-seed one-epoch A/B moved train_avg by 1e-6 (bf16 reassociation noise, not behaviour). The honest confounds are real and limit the headline: peak memory goes 3.5 -> 22.1 GB, so the run can no longer share a card; at 1.5 degrees turning checkpointing off is worth only ~1.24x and the compile lever was never measured there at all; the equivalence A/B was run at S=2 only; the whole-curriculum projection is one measured S=10 ratio divided into the logged total, not an observed fast run; and most of the benchmark figures were live session measurements that were never written to a file in this repo, so only the code citations, the epoch_logs.csv numbers and the four rows recorded in the fast config header are independently re-checkable.",
+      "sections": [
+        {
+          "heading": "Evidence 1 - where the 12.95 h went (27 epochs of runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/epoch_logs.csv, summed)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Phase",
+                "Seconds over 27 epochs",
+                "Share of wall time"
+              ],
+              "rows": [
+                [
+                  "Train loop (total)",
+                  "45493.4",
+                  "97.62%"
+                ],
+                [
+                  "  of which backward",
+                  "30162.1",
+                  "64.72%"
+                ],
+                [
+                  "  of which forward + loss",
+                  "13274.1",
+                  "28.48%"
+                ],
+                [
+                  "  of which optimizer",
+                  "639.3",
+                  "1.37%"
+                ],
+                [
+                  "  of which data",
+                  "31.9",
+                  "0.07%"
+                ],
+                [
+                  "Validation",
+                  "1101.1",
+                  "2.36%"
+                ],
+                [
+                  "Checkpointing",
+                  "8.4",
+                  "0.02%"
+                ],
+                [
+                  "Total",
+                  "46603.3",
+                  "100%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "There is nothing to optimise outside the train loop: validation, checkpointing and the dataloader together are 2.45% of wall time. Backward alone is 64.7%, and backward is exactly what rollout-step checkpointing inflates, since checkpointing re-runs the forward of every rollout step during the backward pass. Per-epoch train time is almost perfectly linear in rollout length: train_time(S) = 278.88*S + 11.67 seconds, R^2 = 0.99973 over all 27 epochs. Nine curriculum stages S=2 to S=10 at 3 epochs each means the cost is dominated by the long-rollout tail. All per-stage seconds quoted in this paragraph are the train_time_sec column, the same column the fit uses, not whole-epoch wall time: the three S=10 epochs are 2797.9, 2798.8 and 2798.7 s of train time each, versus a mean of 591 s at S=2 (596.7, 587.7, 589.3). Whole-epoch times including validation are higher - 2840 s at S=10 and 632 s at S=2 - and it is those whole-epoch figures that sum to the 46603 s total above."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 2 - the benchmark (repo Trainer, S=10, batch 4 x accum 3, 2 repeats per config, uncontended cards, torch.cuda.synchronize around forward and backward)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Config",
+                "L40S 46GB, s per micro-batch",
+                "97GB card, s per micro-batch",
+                "Peak allocated, L40S"
+              ],
+              "rows": [
+                [
+                  "As run (checkpointing on)",
+                  "0.8471",
+                  "0.5992",
+                  "3.49 GB"
+                ],
+                [
+                  "Rollout checkpointing off",
+                  "0.5908",
+                  "0.4150",
+                  "27.51 GB"
+                ],
+                [
+                  "+ compiled processor",
+                  "0.3926",
+                  "0.3125",
+                  "22.10 GB"
+                ],
+                [
+                  "Compile only (checkpointing still on)",
+                  "0.6088",
+                  "not measured",
+                  "2.95 GB"
+                ]
+              ]
+            },
+            {
+              "type": "list",
+              "items": [
+                "The peak column is L40S throughout, so that the four rows are on one basis. The 97 GB card's own peak for the both-levers row is 22.08 GB, essentially the same figure on a different allocator; the entry quotes 22.1 GB when it needs one number.",
+                "Same-card speedups: 1.43x from dropping checkpointing on the L40S, 2.16x with compile on top. On the 97GB card, 1.44x then 1.92x. Cross-card, as-run L40S to fully-optimised 97GB card is 2.71x (0.8471 / 0.3125). That 2.71x is the single value this entry uses for the S=10 both-levers cross-card speedup everywhere it appears.",
+                "Harness validation before trusting any of this: the as-run row reproduces the production run's own logged numbers - 3.49 GB benchmarked peak against 3.497509 GB logged at S10, and a benchmarked throughput of 4.607 samples/s against 4.68 logged. The memory check is exact and independently re-checkable against epoch_logs.csv; the throughput check is a session measurement (see the provenance caveat below).",
+                "The compile-only row is the memory-constrained fallback: 2.95 GB peak, still ~1.4x faster than as-run, and it fits anywhere the original fitted.",
+                "Provenance: the fast config's header comment records the L40S column's 0.8471 / 3.49, 0.5908 / 27.51 and 0.3926 / 22.10, the 97 GB card's 0.3125 / 22.08, and the compile-only fallback's 2.95 GB peak. The 97 GB card's 0.5992 and 0.4150, the compile-only 0.6088 timing, and the 4.607 samples/s validation were live session measurements that were never persisted. They are self-consistent with what is recorded (0.8471 / 0.6088 = 1.39x reproduces the header's '~1.4x'; 0.5992 / 0.3125 = 1.92x), which supports them but does not verify them."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Trap 1 - the two checkpointing config flags are aliases for one mechanism (src/trainer.py, lines 218-219 and 2197-2213)",
+          "blocks": [
+            {
+              "type": "p",
+              "text": "src/trainer.py reads two independent config flags at lines 218-219, activation_checkpointing and checkpoint_rollout_steps, then gates a single code path on their disjunction at line 2200: not (bool(getattr(self, \"activation_checkpointing\", False)) or bool(getattr(self, \"checkpoint_rollout_steps\", False))). Because the test is an OR, setting exactly one of them to false changes nothing - the other keeps the recompute fully on. There is no second, finer-grained mechanism behind the first flag: grepping src/models.py and src/processor.py for checkpoint returns no hits, so there is no intra-model layer checkpointing anywhere. Both flags feed the same two torch.utils.checkpoint call sites in _forward_model_step_train, lines 2208 and 2213, which wrap one whole rollout step with use_reentrant=False."
+            },
+            {
+              "type": "list",
+              "items": [
+                "Measured on the L40S, both half-settings: turning off only activation_checkpointing, and turning off only checkpoint_rollout_steps, each reproduced the fully-on peak of 3.50 GB and each showed no speedup. Memory is the comparison that can be made like for like here - all three settings report the same 3.50 GB peak through train.py, against 3.497509 GB logged by the production run - and it is unambiguous: neither half-setting frees a byte. The throughput figures recorded for the half-settings in that session were on a different basis from the per-micro-batch table above and could not be reconciled to it, so they are not published.",
+                "Practical consequence: anyone who turned off the flag they remembered and re-benchmarked would have concluded the lever does not work. Both must be false.",
+                "The mechanism is correct for what it does - it trades one extra forward per rollout step for activation memory. At S=10 that is ten extra forwards per micro-batch, which is why it shows up as 64.7% backward rather than as a forward cost."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Trap 2 - torch.compile(model) is a silent no-op (src/trainer.py 2165-2187 and 563-594, src/models.py 288 and 301)",
+          "blocks": [
+            {
+              "type": "p",
+              "text": "torch.compile returns an OptimizedModule that intercepts only __call__ and forward. The training hot path never goes through either: src/trainer.py lines 2165-2187 hold eight call sites, all of the form self.model.forward_steps(previous, current, ...), and forward_steps is a plain method defined at src/models.py line 301, so attribute lookup resolves straight through the wrapper to the uncompiled method. Compiling the top-level model therefore costs compile time and buys exactly zero - and it fails silently, with no warning, because nothing is wrong from PyTorch's point of view."
+            },
+            {
+              "type": "list",
+              "items": [
+                "The fix is to compile the submodule that is invoked normally. src/models.py line 288 is h = self.processor(h, diagnostics_collector=diagnostics_collector) - an __call__, so the wrapper does intercept it - and the processor carries the bulk of the compute.",
+                "This is now stated in the docstring of _maybe_compile_processor (src/trainer.py 563-571) so the next person does not rediscover it.",
+                "Equivalence, one epoch, same seed, compiled vs not: train_avg 0.342493 vs 0.342494; valid_S10_final 1.463244 vs 1.463258. That is bf16 reassociation noise from kernel fusion changing summation order, not a behaviour change. These four numbers are recorded in the fast config's header comment."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Whole-curriculum projection (one measured S=10 ratio divided flat into the run's logged 46603 s total - NOT a stage-by-stage model)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Scenario",
+                "Projected wall time",
+                "Speedup vs as-run"
+              ],
+              "rows": [
+                [
+                  "As run (L40S, checkpointing on, no compile)",
+                  "12.95 h",
+                  "1.00x"
+                ],
+                [
+                  "Both levers, staying on the L40S",
+                  "~6.0 h",
+                  "2.16x"
+                ],
+                [
+                  "Both levers, 97GB card",
+                  "4.77 h",
+                  "2.71x"
+                ],
+                [
+                  "Both levers, 97GB card, S10 stage dropped",
+                  "3.90 h",
+                  "3.32x"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "This is arithmetic on the logged total, not an observed run, and the method is exactly one division. The 97 GB row is 46603.3 s divided by the S=10 per-micro-batch ratio 0.8471 / 0.3125 = 2.71, giving 4.78 h, which the fast config header records as 4.77 h. The L40S row uses the same-card S=10 ratio 0.8471 / 0.3926 = 2.16. The last row takes the as-run total minus the three S=10 epochs (46603.3 - 8520.9 = 38082.4 s = 10.58 h), divides by the same 2.71, and gets 3.90 h, which is 3.32x the as-run 12.95 h."
+            },
+            {
+              "type": "p",
+              "text": "A correction to an earlier draft of this entry, stated plainly because it weakens the projection: that draft described this section as applying per-stage multipliers measured at S=2, S=5 and S=10 (2.47x, 2.89x, 2.65x) to the run's own per-stage times. It did not - the published figures are the flat division above - and those per-stage multipliers were never written to any file in this repo, so they cannot be re-checked and have been removed rather than re-quoted. The honest consequence is that the projection rests on a single ratio measured at S=10 alone, assumed without measurement to hold at every shorter rollout. That assumption is not load-bearing for the headline, because short stages are a small share of the cost (S=2 and S=3 together are 9.4% of train time), but it is an assumption and not a measurement. The 2.65x that draft attributed to S=10 also disagreed with the 2.71x the fast config records for the same quantity; 2.71x is the value this entry now uses throughout, on the basis stated in Evidence 2."
+            },
+            {
+              "type": "p",
+              "text": "The last row is a recipe question, not a speed one: dropping the S10 stage is only free if S10 training is not carrying the day-10 skill, which this measurement does not address."
+            }
+          ]
+        },
+        {
+          "heading": "Ruled out - things that look like levers and are not",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Batch size. The GPU is already compute-saturated at batch 4, and a 10-step rollout is ten sequentially dependent forwards, so adding width does not reduce latency. Measured with checkpointing off on the L40S: batch 6 x accum 2 gave +0.04% over batch 4 x accum 3 - noise. On the 97GB card, batch 12 x accum 1 gave +12% for 81.49 GB peak, roughly 3x the memory for a tenth of the speedup, and it does not fit the L40S at all. Keep batch 4 x accum 3. These three figures are session measurements with no artifact in the repo.",
+                "Dataloader. 31.9 s across all 27 epochs, 0.07% of wall time. Nothing to win. This one is straight out of epoch_logs.csv.",
+                "fp16 instead of bf16. This is a hardware-spec argument, not something benchmarked here: sm_89 and sm_120 tensor cores run fp16 and bf16 at the same rate, so fp16 would only reintroduce GradScaler overflow risk for no expected gain. Untested in this repo.",
+                "Multi-GPU DDP. Not implemented - grepping src/ and scripts/ finds no init_process_group, no DistributedDataParallel wrap, and src/data.py builds a plain DataLoader at line 531 with no DistributedSampler. This is a feature to write, not a setting to flip, and it is worth less than the two levers above until they are on. This one is fully verifiable by grep."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "What shipped",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "A compile_processor config flag in src/trainer.py (plus compile_processor_mode). _maybe_compile_processor runs at line 552, deliberately AFTER any checkpoint restore, because compile rewrites the submodule's state_dict keys to processor._orig_mod.* and would not match a stored checkpoint.",
+                "_canonical_model_state() (src/trainer.py 596-605) strips the ._orig_mod. prefix on save, so checkpoints written by a compiled run stay loadable by uncompiled runs and by scripts/evaluate.py.",
+                "If torch.compile raises, it is caught and the run continues eager - a compile failure must never cost a training run.",
+                "It refuses to start alongside EMA: the EMA shadow and backup dicts are keyed by live parameter names, which compile rewrites, and that key mapping is untested. Raise rather than silently write EMA state under mismatched keys.",
+                "A drop-in twin config, configs/experiments/config_2p5_l3_hidden160_dense_l3k24_curriculum_S2toS10_3ep_initckpt_s1_200ep_fast.yaml. Diffed against the as-run config it changes only the run and experiment names, three tags, the two checkpointing flags and compile_processor - lr, warmup, cosine, curriculum and effective batch 12 are byte-identical."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest caveats",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Peak memory goes 3.5 GB -> 22.1 GB. The old config could share a GPU with another user's job; this one cannot. That is a real operational cost, not a rounding detail, and on a shared box it may outweigh the speedup. The compile-only fallback (2.95 GB, ~1.4x) exists for exactly that case.",
+                "Provenance: most of the benchmark numbers in this entry were live session measurements that were never written to a file in this repo, and a repo-wide grep finds no artifact for them. Independently re-checkable are the code and grep claims, everything drawn from epoch_logs.csv (the Evidence 1 table, the linear fit, the logged 4.68 samples/s and 3.497509 GB), and the four benchmark rows plus the A/B numbers recorded in the fast config's header comment. NOT re-checkable are the 97 GB card's 0.5992 and 0.4150, the compile-only 0.6088, the 4.607 samples/s harness validation, the batch-size sweep figures, and every 1.5-degree number below. Either the benchmark output gets persisted into the repo and cited, or those figures should be read as one operator's session log.",
+                "All memory figures are for the 2.5 degree grid. The 1.5 degree grid has 2.8x the nodes (121x240 = 29040 against 72x144 = 10368), so re-measure before enabling anything there. What was measured at 1p5, L3 h128, S10: checkpointing on 7.92 GB / 2.880 samples/s; off at batch 4, 61.69 GB / 3.411 samples/s; off at batch 2 x accum 6, 31.26 GB / 3.567 samples/s. That is ~1.24x, and it is the checkpointing lever ALONE - no compiled-processor measurement was ever taken at 1.5 degrees, so the compile half of this entry is entirely untested there and the combined 2.7x headline must not be quoted for 1.5 degrees in either direction.",
+                "The numerical equivalence A/B was run at S=2 only. Longer rollouts compound more arithmetic, so equivalence at S=10 is inferred, not measured. The compile speedup itself has one persisted measurement, at S=10.",
+                "Epoch times on this box vary enormously between identically-configured runs because of GPU contention, which is why no absolute hour figure here should be trusted to better than a factor. Verifiable instance: runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt and runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7 are both hidden_dim 128, both 2,473,847 parameters, both batch 4 x accum 3, differing only in lr, min_lr and warmup_epochs - and they averaged 383.8 s against 661.6 s per S=2 epoch (1.72x) and 1697.3 s against 4327.0 s per S=10 epoch (2.55x). All benchmark rows in this entry were taken on idle cards back to back, so the same-session ratios are trustworthy; the projected absolute hours are indicative and a real run will land wherever contention puts it.",
+                "The projection is one measured S=10 ratio divided into this run's logged total. It is arithmetic on measurements, not an observed end-to-end fast run, and it assumes without measurement that the S=10 ratio holds at shorter rollouts - nobody has yet run the full 27-epoch curriculum with the fast config and timed it. Until someone does, treat 4.77 h as an estimate with the contention caveat above stacked on top of it."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/epoch_logs.csv (27 epochs of per-phase timers: train/valid/backward/forward+loss/optimizer/data/checkpoint seconds, train_samples_per_second, cuda_peak_allocated_gb; source of the 12.95 h total, the phase shares, the per-stage train times, the logged 4.68 samples/s and 3.497509 GB at S10, and the train_time(S) = 278.88*S + 11.67 fit at R^2 = 0.99973)",
+        "src/trainer.py lines 218-219 and 2197-2213 (the two aliased checkpointing flags and the OR gate at line 2200; the two torch.utils.checkpoint call sites at 2208 and 2213 with use_reentrant=False)",
+        "src/trainer.py lines 2165-2187 (eight hot-path call sites on self.model.forward_steps, which torch.compile does not intercept)",
+        "src/trainer.py lines 548-605 (the shipped compile_processor flag: _maybe_compile_processor invoked at 552 after the checkpoint-restore branch, defined 563-594 with the no-op rationale in its docstring at 564-571; EMA refusal; eager fallback; _canonical_model_state at 596-605 stripping the ._orig_mod. prefix on save)",
+        "src/models.py line 288 (processor invoked through __call__, so compiling the processor works) and line 301 (forward_steps defined as a plain method)",
+        "src/models.py and src/processor.py (grepped for checkpoint: zero hits, confirming there is no separate intra-model layer checkpointing)",
+        "src/data.py and scripts/ (grepped for init_process_group, DistributedDataParallel, DistributedSampler: zero hits anywhere in src/ or scripts/; src/data.py line 531 builds a plain DataLoader, confirming DDP is unimplemented rather than merely disabled)",
+        "configs/experiments/config_2p5_l3_hidden160_dense_l3k24_curriculum_S2toS10_3ep_initckpt_s1_200ep_fast.yaml (the shipped drop-in config. Its header comment records FOUR benchmark rows only - L40S 0.8471/3.49, L40S ckpt-off 0.5908/27.51, L40S ckpt-off+compile 0.3926/22.10, 97GB ckpt-off+compile 0.3125/22.08 - plus the 1.43x / 2.16x / 2.71x ratios, the 2.95 GB ~1.4x fallback, the 12.95 -> 4.77 h projection, '2 reps, uncontended cards', and the four A/B equivalence values. It does NOT contain the 97GB checkpointing-on or checkpointing-off timings, the compile-only timing, the samples/s validation, the batch-size sweep, or any 1.5-degree figure; those have no artifact in this repo)",
+        "configs/experiments/config_2p5_l3_hidden160_dense_l3k24_curriculum_S2toS10_3ep_initckpt_s1_200ep.yaml (the as-run baseline it was diffed against; the diff is only run/experiment names, three tags, the two checkpointing flags and compile_processor)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt and runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7 (training_metrics.csv, config_resolved.yaml, model_summary.txt: two computationally identical h128 curricula, 2,473,847 parameters each, differing only in lr/min_lr, whose 1.72x and 2.55x epoch-time spread anchors the GPU-contention caveat)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard - the complete timing and benchmark review this entry summarises (private artifact, reachable only by accounts it has been shared with)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        },
+        {
+          "label": "PyTorch docs - torch.utils.checkpoint (the recompute-instead-of-store tradeoff behind Trap 1)",
+          "url": "https://pytorch.org/docs/stable/checkpoint.html"
+        },
+        {
+          "label": "PyTorch docs - torch.compile (returns a wrapper module intercepting __call__/forward, the mechanism behind Trap 2)",
+          "url": "https://pytorch.org/docs/stable/generated/torch.compile.html"
+        }
+      ]
+    },
+    {
+      "id": "curriculum-lr-freeze",
+      "title": "The curriculum ends LR-frozen, not converged - and the last stage is wasted",
+      "date": "2026-07-18",
+      "status": "analysis",
+      "verdict": "Claim: the 27-epoch S2-to-S10 rollout curriculum stopped improving because its single warmup-cosine LR schedule ran out of step size, not because the rollout objective ran out of signal - and the final S10 stage bought nothing that beat the standing best. Assessment: the LR-freeze reading is well supported through S9, the wasted-last-stage reading is real but single-seed. The best checkpoint is epoch 23 of 27, inside stage S9, and the whole S10 stage (2.37 h, 18.3% of a 12.95 h run) never beat it. The run defines its own noise band - valid_S10_final spans 0.001253 peak-to-peak over epochs 24-27, all at LR below 3e-6 and with no trend - and the stage entries into S6, S7, S8 and S9 all produced drops larger than that band (3.9x, 3.9x, 4.5x and 1.4x it), the last of them at a learning rate of 5.3e-6. The S10 stage entry's apparent -0.001253 drop is numerically identical to the noise band and carries no weight in either direction. Meanwhile train_loss_final fell monotonically inside every stage right through epoch 27 - the optimizer was still descending, the step size was gone. Two confounds bound the conclusion: the size of any gain from an LR restart is extrapolated rather than measured (stage-transition gains conflate new-horizon exposure with learning rate, and S8's own within-stage change was a worsening of +0.39%), and the only flat-LR control that exists is hidden_dim 128 warm-started from a different base, so it is suggestive but not architecturally matched.",
+      "sections": [
+        {
+          "heading": "Evidence 1 - the best checkpoint is epoch 23 of 27, in stage S9 (training_metrics.csv and epoch_logs.csv, subject run)",
+          "blocks": [
+            {
+              "type": "p",
+              "text": "Epoch 23 jointly minimises valid_S10 (0.141999) and valid_S10_final (0.261364) and maximises skill_S10 (0.718717, against a constant persistence_S10 of 0.504827). It is the global optimum on all three metrics across all 27 epochs. Epoch 23 is the second of the three S9 epochs (train_rollout_steps = 9 for epochs 22-24). The four epochs that follow - one more at S9 and the entire S10 stage - never match it: the best valid_S10_final in the S10 stage is 0.261741, which is 0.14% worse."
+            },
+            {
+              "type": "list",
+              "items": [
+                "Run: runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep, hidden 160, dense l3k24 v4 graph, 27 epochs, 46603 s total = 12.95 h.",
+                "Warm-started from runs/s1only_2p5_l3_hidden160_base_200epoch_dense_l3k24/best_ckpt.tar (best valid_S1 = 0.0174192, at epoch 200).",
+                "LR schedule is a single warmup_cosine across the whole run - lr falls monotonically from 5.0e-5 at epoch 1 to 1.0e-6 at epoch 27, with no per-stage restart. The stages are rollout-horizon stages only; nothing about the schedule is aware of them."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 2 - per-stage best valid_S10_final, and the LR the stage was entered at (training_metrics.csv, 3 epochs per stage)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Stage",
+                "Epochs",
+                "LR at stage entry",
+                "Best valid_S10_final",
+                "Change vs previous stage"
+              ],
+              "rows": [
+                [
+                  "S2",
+                  "1-3",
+                  "5.0e-5",
+                  "0.367925",
+                  "-"
+                ],
+                [
+                  "S3",
+                  "4-6",
+                  "4.84e-5",
+                  "0.347773",
+                  "-5.48%"
+                ],
+                [
+                  "S4",
+                  "7-9",
+                  "4.38e-5",
+                  "0.321736",
+                  "-7.49%"
+                ],
+                [
+                  "S5",
+                  "10-12",
+                  "3.69e-5",
+                  "0.287827",
+                  "-10.54%"
+                ],
+                [
+                  "S6",
+                  "13-15",
+                  "2.85e-5",
+                  "0.277339",
+                  "-3.64%"
+                ],
+                [
+                  "S7",
+                  "16-18",
+                  "1.96e-5",
+                  "0.270065",
+                  "-2.62%"
+                ],
+                [
+                  "S8",
+                  "19-21",
+                  "1.16e-5",
+                  "0.264649",
+                  "-2.01%"
+                ],
+                [
+                  "S9",
+                  "22-24",
+                  "5.34e-6",
+                  "0.261364",
+                  "-1.24%"
+                ],
+                [
+                  "S10",
+                  "25-27",
+                  "1.71e-6",
+                  "0.261741",
+                  "+0.14%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "Every stage from S3 through S9 improved the metric. S10 is the only stage that did not. The improvements shrink monotonically from S5 onward while the LR available to exploit each new horizon shrinks by about a third per stage on average. The successive stage-entry LR ratios are 0.97, 0.91, 0.84, 0.77, 0.69, 0.59, 0.46 and 0.32, a geometric mean of 0.656 - so the decay is mild early and steep late, and only the last two transitions are at or beyond a halving. By S10 the model is being shown a horizon it has never trained on, at 3.4% of the learning rate it had at S2."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 3 - cost rises monotonically with horizon while gains shrink (epoch_time from training_metrics.csv)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Stage",
+                "Mean epoch time",
+                "Stage wall time",
+                "Share of 12.95 h run",
+                "Gain in valid_S10_final"
+              ],
+              "rows": [
+                [
+                  "S2",
+                  "632 s",
+                  "0.53 h",
+                  "4.1%",
+                  "-"
+                ],
+                [
+                  "S3",
+                  "878 s",
+                  "0.73 h",
+                  "5.7%",
+                  "-0.020152"
+                ],
+                [
+                  "S4",
+                  "1149 s",
+                  "0.96 h",
+                  "7.4%",
+                  "-0.026037"
+                ],
+                [
+                  "S5",
+                  "1438 s",
+                  "1.20 h",
+                  "9.3%",
+                  "-0.033909"
+                ],
+                [
+                  "S6",
+                  "1738 s",
+                  "1.45 h",
+                  "11.2%",
+                  "-0.010488"
+                ],
+                [
+                  "S7",
+                  "2004 s",
+                  "1.67 h",
+                  "12.9%",
+                  "-0.007274"
+                ],
+                [
+                  "S8",
+                  "2287 s",
+                  "1.91 h",
+                  "14.7%",
+                  "-0.005416"
+                ],
+                [
+                  "S9",
+                  "2568 s",
+                  "2.14 h",
+                  "16.5%",
+                  "-0.003285"
+                ],
+                [
+                  "S10",
+                  "2840 s",
+                  "2.37 h",
+                  "18.3%",
+                  "+0.000377"
+                ]
+              ]
+            },
+            {
+              "type": "list",
+              "items": [
+                "Epoch time is almost exactly linear in the rollout horizon: a least-squares fit over stages S2-S10 gives t = 51.7 + 279.1 * S seconds. Each added rollout step costs a fixed 279 s per epoch.",
+                "The S10 stage cost 8521 s = 2.37 h, 18.3% of the run, and produced nothing that beat the standing best from epoch 23.",
+                "Counting from the best checkpoint: epochs 24-27 cost 11093 s = 3.08 h, 23.8% of the run, and improved nothing. Nearly a quarter of the compute is downstream of the optimum."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 4 - the central claim: LR-freeze, not convergence (valid_S10_final and train_loss_final per epoch, subject run; every delta below is judged against one explicitly defined noise band)",
+          "blocks": [
+            {
+              "type": "p",
+              "text": "The noise band is defined once, from this run's own flat tail, and used everywhere in this entry: over epochs 24-27 - all at LR below 3e-6 - valid_S10_final spans 0.261741 to 0.262994, a peak-to-peak spread of 0.001253 (0.48% about a midpoint of 0.26237) with no trend in either direction. Anything smaller than 0.001253 is not a result on this run."
+            },
+            {
+              "type": "p",
+              "text": "If the curriculum had converged, new horizons would stop helping. Through S9 they did not. The stage entries into S6, S7 and S8 dropped valid_S10_final by 0.004904, 0.004913 and 0.005617 - 3.9x, 3.9x and 4.5x the noise band. The entry into S9 moved it from 0.265669 (epoch 21) to 0.263934 (epoch 22), a drop of 0.001736 or -0.65%, at a learning rate of 5.34e-6: 1.4x the noise band, marginal but outside it. So the horizon signal was still demonstrably live at 5.3e-6, which is where the schedule had already spent 89% of its step size."
+            },
+            {
+              "type": "p",
+              "text": "The S10 stage entry cannot be used as evidence and is not used here. It moved valid_S10_final from 0.262994 (epoch 24) to 0.261741 (epoch 25) at LR 1.71e-6, a drop of 0.001253 - numerically identical to the noise band, because epoch 24 is the maximum and epoch 25 the minimum of the very window that defines it. The last stage entry that survives the noise floor is S9's."
+            },
+            {
+              "type": "list",
+              "items": [
+                "train_loss_final falls monotonically inside all nine stages without exception, including the last: S10 gives 0.21047, 0.20885, 0.20800 across epochs 25-27. The optimizer was still descending on the objective it was given; it simply had no step size left to convert that into validation gain. This, and not the S10 validation wobble, is what carries the LR-freeze reading at the very end of the run.",
+                "The S10 stage best (0.261741, epoch 25) never beats the standing best (0.261364, epoch 23). The epoch-24-to-25 move is a recovery inside the flat tail, not a new optimum, and must not be read as a stage gain.",
+                "The three S10 epochs run at LR 1.71e-6, 1.18e-6 and 1.00e-6 - the cosine floor. The stage with the largest per-epoch cost in the run (2840 s) is the one given the least ability to learn."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 5 - valid_S1 degraded 13.5% over the curriculum, and it is not overfitting (s1_overfit_curve.csv)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Quantity",
+                "Epoch 1",
+                "Epoch 27",
+                "Change"
+              ],
+              "rows": [
+                [
+                  "train_S1_loss",
+                  "0.0167454",
+                  "0.0187837",
+                  "+0.0020384"
+                ],
+                [
+                  "valid_S1_loss",
+                  "0.0181860",
+                  "0.0206401",
+                  "+0.0024540"
+                ],
+                [
+                  "overfit_gap_S1",
+                  "0.0014407",
+                  "0.0018563",
+                  "+0.0004157"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "valid_S1 rose from 0.018186 at epoch 1 to 0.020640 at epoch 27, +13.5%, and is +18.5% against the 0.0174192 of the 200-epoch S1 base it warm-started from. But the train-valid gap widened by only 0.0004157 of the 0.0024540 total, so about 83% of the valid_S1 degradation is a shift in the training loss itself, not a generalisation failure. The model is not memorising - it is being moved. The rollout objective penalises error growth over 10 steps, and that is best served by a smoother, more dissipative one-step operator than pure one-step MSE would select. The one-step skill is being traded away deliberately, and the trade is worth it: skill_S10 goes from 0.634015 at epoch 1 to 0.718717 at epoch 23."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 6 - diminishing returns, and why extending the curriculum is a bad trade",
+          "blocks": [
+            {
+              "type": "p",
+              "text": "Fitting the per-stage gain magnitude log-linearly over stages S4 to S9 gives delta(S) = 0.2096 * exp(-0.4634 * S), i.e. each added rollout step buys about 37% less than the last (exp(-0.4634) = 0.629). The fit is restricted to S4-S9 deliberately: S10's delta is positive (+0.000377) and cannot enter a magnitude fit at all, and S2-S3 sit in the warm-start transient. Extrapolating that curve to stages S11 through S20 at 3 epochs each gives a total further gain of about -0.0034 in valid_S10_final - roughly 1.3% relative - for about 36.5 h of compute at the fitted epoch cost. That is 2.8x the entire run so far for a 1.3% metric move, and it is an extrapolation of a curve whose last measured point already violated it."
+            }
+          ]
+        },
+        {
+          "heading": "Recommendation",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Do not extend the curriculum past S10. The measured marginal gain at S9 is already only -0.003285 for 2.14 h - 2.6x the noise band and falling - and S10 returned nothing that beat the standing best, for 2.37 h.",
+                "Spend the compute on a second cosine restart at S9 or S10 instead. Nine epochs at S10 cost about 7.1 h at the fitted 2842.3 s per epoch, which is about a fifth (19.5%) of the 36.5 h that one extra decade of curriculum stages would cost (Evidence 6), and it attacks the constraint that is actually binding. The horizon signal was demonstrably not exhausted at S9 (Evidence 4); the learning rate was.",
+                "Practical form: reload runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/best_ckpt.tar (epoch 23, S9), pin train_rollout_steps at 10, and run a fresh warmup_cosine from something in the 5e-6 to 1e-5 range - roughly the LR the model had entering S8 (1.16e-5) or S9 (5.34e-6), which is the last part of the schedule where the run was still moving valid_S10_final by more than its own noise band. That range is a starting point chosen from where step size still existed; it is not a projection of what the restart will buy, for the reason given in the second confound below.",
+                "Track valid_S1 alongside valid_S10_final during the restart. If the S1 degradation accelerates sharply while valid_S10_final stalls, that would falsify the LR-freeze reading and point at a genuine capacity or objective limit instead.",
+                "Cheaper preregistered check first: rerun only the S10 stage (3 epochs, 2.37 h) from the epoch-23 checkpoint at a restarted LR. Precommit to the noise band - it counts as a win only if it beats 0.261364 by more than 0.001253. If it does, the hypothesis holds and the full 9-epoch restart is justified."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "\"The S10 stage is wasted\" is a single-seed, single-run observation. It rests on a gap of 0.000377 in valid_S10_final between the S9 and S10 stage bests - which is a third of the 0.001253 noise band defined in Evidence 4. On this run's own noise floor the S10 stage is indistinguishable from neutral, not proven harmful; what is solid is that it cost 2.37 h and returned nothing that beat epoch 23. Never training on the evaluation horizon is a real risk that this metric may not capture; before dropping S10 by default, verify a no-S10 variant against valid_S10_final = 0.261364.",
+                "The size of the gain from an LR restart is EXTRAPOLATED, not measured. Nothing in this run restarts a learning rate, so there is no direct observation of what one buys. The tempting anchor - the -0.65% drop at the S9 transition - is confounded twice over: it is only 1.4x the noise band, and whatever gain it represents is driven by new-horizon exposure rather than by learning rate. The clean within-stage counter-example is S8: with the horizon held fixed, its own three epochs went 0.264649, 0.264922, 0.265669, a change of +0.39%, i.e. a worsening. Stage-transition gains must not be quoted as evidence for what an LR restart would buy.",
+                "A flat-LR sibling run exists (runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr5e7, lr and min_lr both pinned at 5.0e-7 over the same S2-to-S10 3-epoch curriculum) and is suggestive, but its config_resolved.yaml shows hidden_dim 128 and init_from_checkpoint pointing at runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/best_ckpt.tar - a different width warm-started from a different base trained for half as many epochs. It is NOT an architecturally matched control and cannot be used to isolate the LR effect. A proper control is a hidden-160 run from the same 200-epoch base with the schedule as the only change.",
+                "The log-linear diminishing-returns fit has 6 points, is fitted on stage bests rather than on repeated measurements, and excludes the one stage (S10) that contradicts it. Its R-squared is not reported here because with 6 points and a hand-chosen window it would overstate confidence. Use the 36.5 h / 1.3% extrapolation as an order-of-magnitude argument against extending the curriculum, not as a forecast.",
+                "The noise band itself is estimated from four consecutive epochs of one run, so it is an order-of-magnitude floor rather than a calibrated error bar, and it is measured on the flat tail where the model is barely moving - a restart at higher LR may well have a wider epoch-to-epoch spread. It is used here to reject claims, which is the direction it can support; it should not be used to certify a small gain as real.",
+                "valid_S10_final is a single scalar over a fixed validation set. The S10 stage could have improved properties this metric does not see - spectral fidelity at long lead, blow-up rate on rare initial conditions, per-band polar skill - and the entry makes no claim about those. The full-eval artifacts under this run's diagnostics_full_eval and evaluation_test_weekly52 were not opened for this analysis."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/training_metrics.csv (per-epoch valid_S10, valid_S10_final, valid_S1, train_loss_final, train_rollout_steps, lr, epoch_time for all 27 epochs; source of every stage best, delta, LR, stage-entry LR ratio, noise band and timing number here)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/epoch_logs.csv (skill_S10 = 0.718717 and persistence_S10 = 0.504827 at epoch 23; confirms epoch 23 is the global skill maximum)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/s1_overfit_curve.csv (train_S1_loss, valid_S1_loss and overfit_gap_S1 per epoch; the 83% train-shift decomposition)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/config_resolved.yaml (lr_schedule_type = warmup_cosine, lr 5.0e-5, min_lr 1.0e-6, warmup_epochs 1; confirms a single whole-run schedule with no stage awareness and no restart)",
+        "runs/s1only_2p5_l3_hidden160_base_200epoch_dense_l3k24/training_metrics.csv (warm-start base best valid_S1 = 0.0174192 at epoch 200)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr5e7/config_resolved.yaml (flat-LR sibling: lr and min_lr 5.0e-7, hidden_dim 128, init_from_checkpoint = hidden128 100-epoch base - the reason it is not a matched control)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard for dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep (per-epoch curves, stage boundaries, evaluation)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        },
+        {
+          "label": "Loshchilov and Hutter (2017) - SGDR: Stochastic Gradient Descent with Warm Restarts, ICLR (the cosine-restart mechanism proposed here)",
+          "url": "https://arxiv.org/abs/1608.03983"
+        },
+        {
+          "label": "Lam et al. (2023) - GraphCast: Learning skillful medium-range global weather forecasting, Science 382 (precedent for the autoregressive rollout curriculum incremented one step at a time, but NOT for the restart proposed here - GraphCast holds a constant learning rate through its autoregressive fine-tuning phase rather than restarting it per rollout increment)",
+          "url": "https://arxiv.org/abs/2212.12794"
+        },
+        {
+          "label": "Keisler (2022) - Forecasting Global Weather with Graph Neural Networks (multi-step rollout training and the one-step-skill / rollout-stability trade-off)",
+          "url": "https://arxiv.org/abs/2202.07575"
+        }
+      ]
+    },
+    {
+      "id": "hidden-dim-128-vs-160",
+      "title": "hidden 128 vs 160 - tied at day 10, separated at day 1 to 5",
+      "date": "2026-07-18",
+      "status": "analysis",
+      "verdict": "Claim: widening the processor from hidden 128 to hidden 160 buys a large, unambiguous short-range gain that has almost entirely decayed by day 10. Assessment: the measurement is solid, the mechanism is not. Day-1 RMSE improves 11.6 to 16.0 percent across all six headline variables with non-overlapping 95 percent CIs, day 5 still holds 5.9 to 8.7 percent, and by day 10 all six CI pairs overlap - on five of the six each run's point estimate also falls inside the other run's interval, q700 being the sole exception, where the two point estimates fall just outside each other's intervals but the intervals themselves still overlap. h128 is nominally ahead on day-10 z500 (683.83 vs 687.46 m2/s2), which on this evidence is a tie. Day-10 ACC still favours h160 by +0.012 to +0.050 on all six, but only q700 is significant. The tempting reading, that h128 buys its day-10 RMSE by over-smoothing, is a hypothesis and not a result: the headline h128 run has no variance-ratio diagnostic, and the nearest available h128 proxies actually retain MORE day-10 z500 variance than h160 - though that proxy comparison is itself confounded by learning rate AND by rollout stage, so it does not refute the hypothesis either. Three confounds dominate everything here: the headline pair is not base-matched (h128 warm-started from a 100-epoch S1 base, h160 from a 200-epoch one); the strongest \"h128 hits a capacity ceiling\" argument leans on an h128 base trained on a 3x sparser L3 graph, so it confounds width with connectivity; and the evaluated checkpoints are not stage-matched (h128 at epoch 27 / S10, both h160 runs at epoch 23 / S9). The most durable finding is elsewhere, but it too must be stated at the right strength: the three day-10 z500 values in the base-versus-width comparison (683.83, 687.46, 701.42) have mutually overlapping CIs, so neither lever is established at day 10. What is not inside the day-10 noise band is the S1 base itself - doubling it from 100 to 200 epochs improved the base's own valid_S1 by 14.6 percent with no architecture change, while +55 percent parameters on a 100-epoch base bought no measurable day-10 gain at all. On that basis: spend compute on the S1 base before spending it on width.",
+      "sections": [
+        {
+          "heading": "Evidence 1 - day 1: h160 wins on every variable and it is not noise (both runs, evaluation_test_weekly52/S10/evaluation_metrics.csv, 51 initial conditions 2018-01-02 to 2018-12-18, 1000-sample bootstrap 95% CI)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable (unit)",
+                "h128 RMSE",
+                "h160 RMSE",
+                "Change",
+                "h128 95% CI",
+                "h160 95% CI"
+              ],
+              "rows": [
+                [
+                  "z500 (m2/s2)",
+                  "101.98",
+                  "87.183",
+                  "-14.5%",
+                  "99.07 to 104.94",
+                  "84.57 to 89.74"
+                ],
+                [
+                  "t2m (K)",
+                  "0.91843",
+                  "0.80342",
+                  "-12.5%",
+                  "0.8954 to 0.9441",
+                  "0.7861 to 0.8226"
+                ],
+                [
+                  "t850 (K)",
+                  "0.99148",
+                  "0.83236",
+                  "-16.0%",
+                  "0.9778 to 1.0051",
+                  "0.8215 to 0.8437"
+                ],
+                [
+                  "msl (Pa)",
+                  "116.39",
+                  "99.266",
+                  "-14.7%",
+                  "113.65 to 119.08",
+                  "96.73 to 101.88"
+                ],
+                [
+                  "q700 (kg/kg)",
+                  "5.1913e-4",
+                  "4.5875e-4",
+                  "-11.6%",
+                  "5.1321e-4 to 5.2515e-4",
+                  "4.5439e-4 to 4.6339e-4"
+                ],
+                [
+                  "u850 (m/s)",
+                  "1.3661",
+                  "1.1884",
+                  "-13.0%",
+                  "1.3510 to 1.3829",
+                  "1.1737 to 1.2035"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "All six intervals are disjoint at day 1, with wide margins - the closest pair (t2m) still leaves a gap of 0.073 K between h160's upper bound and h128's lower bound. At day 5 the ordering is unchanged and the margin has roughly halved: h160 is better by -5.89% (u850), -6.12% (q700), -6.31% (msl), -6.91% (z500), -7.63% (t850) and -8.72% (t2m). Five of the six day-5 intervals are cleanly disjoint; msl is disjoint only by a hair (h160 upper 395.913 Pa vs h128 lower 395.949 Pa, a gap of 0.04 Pa) and should be read as borderline rather than established."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 2 - day 10: the advantage has fallen into the noise floor (same files, lead_time 10)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable (unit)",
+                "h128 RMSE",
+                "h160 RMSE",
+                "Change",
+                "h128 95% CI",
+                "h160 95% CI"
+              ],
+              "rows": [
+                [
+                  "z500 (m2/s2)",
+                  "683.83",
+                  "687.46",
+                  "+0.53%",
+                  "661.99 to 704.06",
+                  "665.07 to 711.58"
+                ],
+                [
+                  "t2m (K)",
+                  "2.4827",
+                  "2.4147",
+                  "-2.74%",
+                  "2.3924 to 2.5677",
+                  "2.3422 to 2.4869"
+                ],
+                [
+                  "t850 (K)",
+                  "2.9720",
+                  "2.9422",
+                  "-1.00%",
+                  "2.8932 to 3.0476",
+                  "2.8677 to 3.0156"
+                ],
+                [
+                  "msl (Pa)",
+                  "613.98",
+                  "611.10",
+                  "-0.47%",
+                  "593.38 to 632.23",
+                  "592.05 to 631.78"
+                ],
+                [
+                  "q700 (kg/kg)",
+                  "1.2316e-3",
+                  "1.2059e-3",
+                  "-2.09%",
+                  "1.2135e-3 to 1.2479e-3",
+                  "1.1849e-3 to 1.2258e-3"
+                ],
+                [
+                  "u850 (m/s)",
+                  "4.6081",
+                  "4.5948",
+                  "-0.29%",
+                  "4.5161 to 4.6934",
+                  "4.4960 to 4.6985"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "All six day-10 CI pairs overlap. On five of the six, each run's point estimate additionally falls inside the other run's 95% CI, in both directions. q700 is the single exception: h128's 1.2316e-3 sits above h160's CI upper bound of 1.2258e-3, and h160's 1.2059e-3 sits below h128's CI lower bound of 1.2135e-3, while the two intervals still share the region 1.2135e-3 to 1.2258e-3. So q700 is the one variable showing a hint of genuine day-10 separation - consistent with Evidence 3, where q700 is also the only variable whose ACC intervals are disjoint."
+            },
+            {
+              "type": "p",
+              "text": "z500 illustrates the general case. h128 683.83 with CI 661.99 to 704.06 and h160 687.46 with CI 665.07 to 711.58 - the intervals share 39.0 of h128's 42.1 m2/s2 of width, i.e. about 93 percent overlap, and the 3.63 m2/s2 gap between the point estimates is under a tenth of either interval. The h128 win on z500 is a tie, not a win, and the same is true of the h160 wins on t2m, t850, msl and u850. Only the sign pattern (five of six favouring h160) is suggestive, and five of six is not significant on its own."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 3 - day-10 ACC keeps a lead that RMSE does not show (same files, acc and acc_ci columns, lead_time 10)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable",
+                "h128 ACC",
+                "h160 ACC",
+                "Delta",
+                "h128 95% CI",
+                "h160 95% CI",
+                "CIs disjoint"
+              ],
+              "rows": [
+                [
+                  "z500",
+                  "0.4926",
+                  "0.5041",
+                  "+0.0116",
+                  "0.4580 to 0.5288",
+                  "0.4688 to 0.5371",
+                  "no"
+                ],
+                [
+                  "t2m",
+                  "0.3881",
+                  "0.4381",
+                  "+0.0500",
+                  "0.3606 to 0.4176",
+                  "0.4082 to 0.4662",
+                  "no"
+                ],
+                [
+                  "t850",
+                  "0.4091",
+                  "0.4422",
+                  "+0.0331",
+                  "0.3804 to 0.4420",
+                  "0.4126 to 0.4695",
+                  "no"
+                ],
+                [
+                  "msl",
+                  "0.4316",
+                  "0.4569",
+                  "+0.0252",
+                  "0.3887 to 0.4726",
+                  "0.4156 to 0.4945",
+                  "no"
+                ],
+                [
+                  "q700",
+                  "0.4112",
+                  "0.4511",
+                  "+0.0399",
+                  "0.3937 to 0.4292",
+                  "0.4327 to 0.4694",
+                  "yes"
+                ],
+                [
+                  "u850",
+                  "0.4086",
+                  "0.4259",
+                  "+0.0173",
+                  "0.3812 to 0.4358",
+                  "0.3964 to 0.4550",
+                  "no"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "h160 is ahead on ACC for all six variables at day 10, by +0.012 to +0.050, and notably it is ahead on z500 (+0.0116) - the one variable where it is nominally behind on RMSE. Only q700 clears the disjoint-CI bar (0.4292 vs 0.4327, a gap of 0.0035). t2m is the largest gain at +0.0500 but its intervals still overlap by 0.009. So the ACC story is a consistent direction on six of six with one significant case, which is stronger than the RMSE picture but is not by itself a proven separation."
+            }
+          ]
+        },
+        {
+          "heading": "Interpretation - the over-smoothing story is a HYPOTHESIS, and the one proxy test available is too confounded to settle it",
+          "blocks": [
+            {
+              "type": "p",
+              "text": "ACC rewards retained anomaly amplitude while RMSE rewards damping - a model that shrinks toward climatology lowers RMSE and lowers ACC at the same time. h160 being ahead on ACC while tied on RMSE at day 10 is the signature one would expect if h128 were buying part of its day-10 RMSE by over-smoothing. Stated plainly: this was not directly tested. The winning h160 run has diagnostics_full_eval/epoch_0023_variance_ratio.csv; the headline h128 run dense_l3k24_curriculum_S2toS10_3ep_initckpt has NO variance_ratio.csv and no variance_ratio key anywhere in its final_full_diagnostics.json. That gap is real and still open as of this entry."
+            },
+            {
+              "type": "p",
+              "text": "There is, however, a partial proxy. Two other h128 curricula, dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7 and _flat_lr5e7, are computationally identical to the headline h128 run (same hidden_dim 128, same v4/l3k24 graph, same 2,473,847 parameters, same batch size; their config_resolved.yaml differs only in lr, min_lr and warmup_epochs) and they DO carry variance-ratio diagnostics. Comparing them to h160 gives the table below - all on the validation split, but NOT at a matched point in the curriculum. Each run's diagnostic is taken at its own evaluated checkpoint: h160's is epoch 23, its global-best checkpoint, which sits inside the S9 stage (train_rollout_steps 9), while both h128 proxies are at epoch 27, the end of their S10 stage (train_rollout_steps 10). Verified in training_metrics.csv, run_diagnostics.log and fixed10_global_best_metrics.json."
+            },
+            {
+              "type": "table",
+              "columns": [
+                "Run (hidden, LR)",
+                "Diag epoch (stage)",
+                "z500 day 1",
+                "z500 day 10",
+                "msl day 10",
+                "t2m day 10"
+              ],
+              "rows": [
+                [
+                  "h160 s1_200ep (160, cosine 5e-5)",
+                  "23 (S9)",
+                  "0.9973",
+                  "0.9614",
+                  "0.8348",
+                  "1.0001"
+                ],
+                [
+                  "h128 flat_lr1e7 (128, flat 1e-7)",
+                  "27 (S10)",
+                  "0.9904",
+                  "0.9723",
+                  "0.8240",
+                  "0.9953"
+                ],
+                [
+                  "h128 flat_lr5e7 (128, flat 5e-7)",
+                  "27 (S10)",
+                  "0.9908",
+                  "0.9748",
+                  "0.8127",
+                  "1.0014"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "The result is mixed and, on the decisive variable, backwards. On msl the h160 model retains more day-10 variance (0.8348 vs 0.8240 and 0.8127), consistent with the hypothesis. On z500 it retains LESS (0.9614 vs 0.9723 and 0.9748) - meaning the h160 model is the more damped one on exactly the field where h128 nominally wins day-10 RMSE. t2m is effectively a tie near 1.0 for all three."
+            },
+            {
+              "type": "p",
+              "text": "Two caveats sit on the proxy, and they push the same way. First, learning rate: the flat-LR runs trained at 1e-7 and 5e-7 rather than 5e-5 cosine, so they sit much closer to their initialisation checkpoint than the headline h128 run does, and they are a lower bound on how much the headline run's training moved its variance ratio. Second, and it bites harder, the comparison is not stage-matched: h160's ratios come from an S9-trained checkpoint and the h128 proxies' from S10-trained checkpoints, and S10 is precisely the stage that trains at the horizon being scored. A stage of rollout training at the longest horizon could plausibly change day-10 variance retention on its own, so the z500 reversal cannot be attributed to width. Conclusion: the over-smoothing explanation is NOT supported by the only h128 evidence that exists, but this proxy is too confounded to refute it either. Carry it as an open question, not as the reading of the ACC-vs-RMSE split, and settle it with a direct diagnostic on the headline h128 checkpoint."
+            }
+          ]
+        },
+        {
+          "heading": "Cost - what the extra width actually costs (model_summary.txt and training_metrics.csv in both runs, 27 training epochs each, 3 epochs per stage)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Curriculum stage",
+                "h128 mean epoch_time (s)",
+                "h160 mean epoch_time (s)",
+                "Ratio"
+              ],
+              "rows": [
+                [
+                  "S2",
+                  "383.8",
+                  "631.7",
+                  "1.646"
+                ],
+                [
+                  "S3",
+                  "545.9",
+                  "878.5",
+                  "1.609"
+                ],
+                [
+                  "S4",
+                  "703.1",
+                  "1149.2",
+                  "1.634"
+                ],
+                [
+                  "S5",
+                  "861.6",
+                  "1438.3",
+                  "1.669"
+                ],
+                [
+                  "S6",
+                  "1031.3",
+                  "1737.9",
+                  "1.685"
+                ],
+                [
+                  "S7",
+                  "1192.3",
+                  "2004.1",
+                  "1.681"
+                ],
+                [
+                  "S8",
+                  "1361.9",
+                  "2286.5",
+                  "1.679"
+                ],
+                [
+                  "S9",
+                  "1542.0",
+                  "2567.9",
+                  "1.665"
+                ],
+                [
+                  "S10",
+                  "1697.3",
+                  "2840.3",
+                  "1.673"
+                ]
+              ]
+            },
+            {
+              "type": "list",
+              "items": [
+                "Parameters: 2,473,847 (h128) vs 3,844,932 (h160), +55.4%, read from trainable_parameters in each run's model_summary.txt.",
+                "Compute cost: mean ratio 1.660x over the nine stage-matched pairs, range 1.609x to 1.685x - a remarkably stable multiplier, and notably ABOVE the 1.554x that the +55.4% parameter growth would predict if cost were parameter-linear. It is not parameter-linear: attention and message passing scale with hidden width differently from parameter count, so the extra width costs somewhat more time than it costs parameters.",
+                "Epoch time is almost exactly linear in rollout length. Fitted on the nine per-stage mean epoch times: h128 epoch_time = 46.4 + 164.8*S seconds, h160 = 51.7 + 279.1*S seconds, both R^2 = 0.9997. Refitting on the raw 27 per-epoch times gives the same coefficients with R^2 = 0.9996 (h128) and 0.9997 (h160). The h160 slope is 1.69x the h128 slope while the intercepts differ by only 5.4 s, i.e. the extra width costs per rollout step, not per epoch of setup.",
+                "Full-curriculum wall clock: 7.77 h (h128) vs 12.95 h (h160) for 27 training epochs each - but see the wall-clock warning below before using those two numbers for anything, and note that 27 epochs each describes the training, not the evaluated checkpoints, which differ (see confounds)."
+              ]
+            },
+            {
+              "type": "p",
+              "text": "Raw wall-clock across runs on this box is NOT comparable. Two computationally identical h128 curricula (dense_l3k24_curriculum_S2toS10_3ep_initckpt vs _flat_lr1e7 - same parameters, same graph, differing only in learning rate) recorded mean S2 epoch times of 383.8 s vs 661.6 s (1.72x) and S10 times of 1697.3 s vs 4327.0 s (2.55x). The same pattern shows in the S1 bases: the two h160 base runs are config-identical except for epoch count, yet averaged 319.8 s/epoch (100-epoch run) vs 210.3 s/epoch (200-epoch run), a 1.52x spread, and the 100-epoch run's own per-epoch times range 215.6 s to 328.7 s within a single run. GPU contention, not configuration, explains those. This is exactly why the 1.66x figure is quoted from nine stage-matched pairs inside two runs rather than from total wall clock."
+            }
+          ]
+        },
+        {
+          "heading": "Base epochs versus width - the day-10 RMSE differences here are all within noise (day-10 z500, evaluation_test_weekly52/S10 in all three runs)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Curriculum run",
+                "Hidden",
+                "S1 base",
+                "Day-10 z500 RMSE (m2/s2)",
+                "95% CI",
+                "Day-10 z500 ACC"
+              ],
+              "rows": [
+                [
+                  "dense_l3k24_curriculum_S2toS10_3ep_initckpt",
+                  "128",
+                  "100 ep (v4)",
+                  "683.83",
+                  "661.99 to 704.06",
+                  "0.4926"
+                ],
+                [
+                  "dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt",
+                  "160",
+                  "100 ep (v4)",
+                  "701.42",
+                  "680.81 to 721.55",
+                  "0.4715"
+                ],
+                [
+                  "dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep",
+                  "160",
+                  "200 ep (v4)",
+                  "687.46",
+                  "665.07 to 711.58",
+                  "0.5041"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "Read this table with the same bar the rest of the entry applies: all three 95% CIs mutually overlap, and every one of the three point estimates falls inside both other intervals. 701.42 sits inside h128's 661.99 to 704.06; 687.46 sits inside the h160-100ep run's 680.81 to 721.55. By the day-10 test used in Evidence 2, these three runs are tied on day-10 z500 RMSE, and no claim below rests on their differences."
+            },
+            {
+              "type": "list",
+              "items": [
+                "h160 warm-started from a 100-epoch S1 base scored 701.42 m2/s2 at day 10, nominally worse than h128's 683.83 despite +55.4% parameters and 1.66x the training cost. Within noise, per the paragraph above. The honest statement is that width alone bought no measurable day-10 improvement - NOT that it made the day-10 forecast worse.",
+                "Holding width fixed at 160 and only doubling the S1 base from 100 to 200 epochs moved day-10 z500 from 701.42 to 687.46 (-2.0%) and day-10 z500 ACC from 0.4715 to 0.5041 (+0.033). The same caveat applies to the RMSE half of that: it is directional, not established. The ACC move is in the same direction as the six-of-six ACC pattern in Evidence 3, which is corroborating but also not individually significant.",
+                "The evidence that does not depend on the day-10 bootstrap at all is the base's own validation loss: the h160 100-epoch S1 base finished at valid_S1 0.020386 (train 0.018738), the h160 200-epoch base at valid_S1 0.017419 (train 0.015870) - 14.6% better valid_S1 with no architecture change. Both from training_metrics.csv, both on the v4/l3k24 graph, and the 200-epoch base's best valid_S1 is its final epoch (200), so it was still improving when it stopped. This is a much larger relative move than anything in the day-10 tables and it is measured directly rather than through a 51-IC bootstrap - though it too is single-seed, and it is a one-step metric, so it does not by itself prove a day-10 benefit.",
+                "Practical conclusion at the strength the evidence supports: the width lever produced no day-10 gain measurable above noise, while the base-epoch lever is the only one of the two with an effect clearly outside noise anywhere in this comparison (14.6% on the base's own valid_S1). Before buying width, buy S1 base epochs. And the 200-epoch h160 base has not plateaued, so the next increment on that axis is probably not exhausted either."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds - this is the part that changes what to run next",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "The headline pair is NOT base-matched. dense_l3k24_curriculum_S2toS10_3ep_initckpt (h128) is tagged warmstart_from_dense_l3k24_S1_100ep; the winning h160 run is tagged warmstart_from_hidden160_S1_200ep, and the tags match the actual init_from_checkpoint paths in both config_resolved.yaml files. An unknown share of the headline day-1 to day-5 gap is therefore base duration rather than width. The h160-on-a-100-epoch-base row is the closest thing to a base-matched comparison available, and on day-10 z500 it says width alone gains nothing measurable - it does not say width loses, because that difference is inside the CIs.",
+                "The evaluated checkpoints are NOT stage-matched either. All three runs trained 27 epochs, but each was evaluated at its own global-best checkpoint, and those do not land at the same point in the curriculum: h128 at epoch 27, the end of its S10 stage (train_rollout_steps 10), and BOTH h160 runs at epoch 23, inside S9 (train_rollout_steps 9). Confirmed from checkpoints.global_best in each run's fixed10_global_best_metrics.json. The h160 numbers therefore come from a model that never finished training at the 10-step horizon it is scored on, while the h128 numbers come from one that did. Whether that helps or hurts h160 at day 10 is untested; it is a real asymmetry in the comparison either way, and it is the same asymmetry that undercuts the variance-ratio proxy above.",
+                "CRITICAL, and the reason not to state a capacity result: the strongest available 'h128 hits a ceiling' argument compares h160's 200-epoch base valid_S1 of 0.0174192 against h128's 200-epoch base train loss of 0.018457 (valid_S1 0.020026) - h128 not even fitting the training set as well as h160 fits the validation set. But that h128 base is runs/s1only_2p5_l3_hidden128_base_200epoch_overfit_probe, and its config_resolved.yaml specifies graph_2p5_k8_hybrid_row_aware_L3_v3.pt with graph_format_version 3 and l3_k_neighbors 8, while every other run in this comparison uses graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt with graph_format_version 4 and l3_k_neighbors 24 - a 3x denser L3. Verified by opening both files. That comparison therefore confounds width with L3 connectivity and must NOT be reported as a clean capacity result.",
+                "Consequence for the next experiment: warm-starting an h128 curriculum from that v3 base would initialise a v4/l3k24 curriculum from weights fitted to a different L3 neighbourhood. The parameter count matches exactly (both 2,473,847) so the checkpoint would load without error - which makes this an easy mistake to make silently - but it is not a like-for-like test and its result would be uninterpretable. A clean answer needs an h128 200-epoch base retrained on v4 first.",
+                "Cost of that clean test: at the measured v4 h128 rate of 130.8 s/epoch (from s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24, 3.63 h for 100 epochs), a 200-epoch v4 h128 base is about 7.3 h of GPU time; the v3 200-epoch base actually took 15.37 h at 276.6 s/epoch on a contended box. Budget roughly 7 to 15 h for the base, on top of about 8 h for the 27-epoch h128 curriculum.",
+                "The over-smoothing hypothesis remains untested for the headline h128 run - no variance_ratio.csv exists for it - and the flat-LR h128 proxies that do exist point against it on z500 while being confounded by both learning rate and rollout stage (see Interpretation). Do not cite it as a finding in either direction.",
+                "All test metrics are single-seed, from 51 initial conditions in a single year (2018-01-02 to 2018-12-18), with bootstrap CIs from 1000 resamples at the 95% level (bootstrap_seed 42). The CIs are per-run and not paired across runs, so disjoint-interval tests here are conservative for day 1 to 5 but say nothing reassuring about day 10. Sub-percent differences at day 10 are ties, full stop - and that rule is applied in this entry to the base-versus-width table too, not only to the headline pair."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "What to run next (ranked by information per GPU-hour)",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "1. Cheapest and highest value: emit a variance-ratio diagnostic for the existing h128 headline checkpoint. No training required, it is an evaluation-side diagnostic, and it directly settles whether the ACC-vs-RMSE split at day 10 is a damping artifact. The flat-LR proxies hint the answer may be no for z500, but they are confounded by learning rate and by rollout stage, which is exactly why the direct measurement is worth having. Emit it at the h160 stage too, or compare like for like at epoch 27.",
+                "2. Train an h128 200-epoch S1 base on the v4/l3k24 graph (about 7 to 15 h). This is the only way to get a base-matched h128 vs h160 comparison and to turn the capacity-ceiling argument from confounded into clean. Everything else in this entry is downstream of it.",
+                "3. Then run the h128 curriculum from that base (about 8 h) and re-evaluate. If h128-from-200ep closes the day-1 gap, the width advantage was largely base duration; if it does not, width is real at short lead and simply does not survive to day 10.",
+                "4. Independently, extend the h160 S1 base past 200 epochs - its best valid_S1 is its final epoch, so that curve had not flattened. Base epochs are the only lever in this entry with an effect clearly outside noise (14.6% on valid_S1), which makes this the better-odds bet on the current architecture.",
+                "5. Do not spend compute on hidden 192 or beyond until 2 to 4 report back. On present evidence the day-10 return on width is not measurable above the noise floor, and the day-1 return, while large and solidly significant, is confounded with base duration until item 2 lands."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/evaluation_test_weekly52/S10/evaluation_metrics.csv (h128 RMSE, ACC and bootstrap CIs at leads 1, 5, 10; t850 lead 1 rmse 0.9914762634 giving the -16.0% day-1 change)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/evaluation_test_weekly52/S10/evaluation_metrics.csv (h160 200-epoch-base RMSE, ACC and CIs at leads 1, 5, 10; t850 lead 1 rmse 0.8323622810)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt/evaluation_test_weekly52/S10/evaluation_metrics.csv (h160 on a 100-epoch base: day-10 z500 701.42 m2/s2, CI 680.81 to 721.55, ACC 0.4715)",
+        "fixed10_global_best_metrics.json in all three runs (checkpoints.global_best: epoch 27 / train_rollout_steps 10 for h128, epoch 23 / train_rollout_steps 9 for both h160 runs - the evaluated-checkpoint stage asymmetry)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/evaluation_test_weekly52/evaluation.log (51 initial conditions, 2018-01-02 to 2018-12-18, 1000 bootstrap samples, 95% level, seed 42)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/model_summary.txt and runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/model_summary.txt (trainable_parameters 2,473,847 and 3,844,932; ratio 1.554x)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/training_metrics.csv and runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/training_metrics.csv (per-stage mean epoch_time, 3 epochs per stage, the nine stage ratios and their 1.660x mean, the linear fits on stage means, total wall clock)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7/training_metrics.csv (computationally identical h128 curriculum; S2 661.6 s and S10 4327.0 s establish the GPU-contention spread)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7/config_resolved.yaml (diffed against the headline h128 config: differs only in lr, min_lr, warmup_epochs and naming)",
+        "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/diagnostics_full_eval/epoch_0023_variance_ratio.csv and the run's run_diagnostics.log ('Diagnostics epoch 23', restored from best_ckpt.tar - the S9-stage basis of the h160 variance ratios)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr5e7/diagnostics_full_eval/epoch_0027_variance_ratio.csv and runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7/diagnostics_full_eval/epoch_0027_variance_ratio.csv (the only h128 variance-ratio data that exists, both at epoch 27 / S10; used as proxies)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/diagnostics_full_eval/ (confirmed absence of any variance_ratio.csv, and no variance_ratio key in final_full_diagnostics.json)",
+        "runs/s1only_2p5_l3_hidden128_base_200epoch_overfit_probe/config_resolved.yaml (graph v3, graph_format_version 3, l3_k_neighbors 8 - the confound) and its training_metrics.csv (train 0.018457, valid_S1 0.020026, 200 epochs, 15.37 h)",
+        "runs/s1only_2p5_l3_hidden160_base_200epoch_dense_l3k24/config_resolved.yaml and training_metrics.csv (graph v4, l3_k_neighbors 24; valid_S1 0.0174192 at final epoch 200)",
+        "runs/s1only_2p5_l3_hidden160_base_100epoch_dense_l3k24/training_metrics.csv (valid_S1 0.0203859 at epoch 100; config-identical to the 200-epoch base except epoch count, giving both the 14.6% base gap and the 1.52x wall-clock spread)",
+        "runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/training_metrics.csv (130.8 s/epoch on v4, basis for the h128 v4 base cost estimate)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/config_resolved.yaml and runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep/config_resolved.yaml (graph paths confirming both curricula use v4/l3k24; init_from_checkpoint identifying the 100-epoch vs 200-epoch base)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard (published review of these runs)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        }
+      ]
+    },
+    {
+      "id": "kai-1p5-crossover",
+      "title": "At 1.5 degrees the curriculum model beats the KAI reference at day 10 and loses the short leads",
+      "date": "2026-07-18",
+      "status": "finding",
+      "verdict": "Claim: the 1.5 degree L3 h128 curriculum model (runs/dense_l3k24_1p5_curriculum_S2toS10_3ep_initckpt, epoch 27, 2.47M params) beats the KAI 1.5 reference. Assessment: true at day 10, false at the short leads, and the headline is misleading without a lead qualifier - but there is no single crossover day. On 51 weekly 2020 initial conditions the model wins day-10 RMSE on all six headline variables (u850 -17.2%, msl -14.5%, q700 -13.8%, z500 -13.4%, t850 -10.1%, t2m -5.7%) and wins day-10 ACC on only four - t850 (0.415 vs 0.423) and t2m (0.411 vs 0.418) go the other way. The per-lead curves are the actual finding, and the crossover is variable-dependent, spanning more than three days: by linear interpolation of the RMSE difference it is u850 5.88, q700 6.39, msl 6.80, z500 7.36, t850 7.77, t2m 8.90. In whole leads the model first wins u850 at day 6, msl and q700 at day 7, z500 and t850 at day 8, and t2m not until day 9. On z500 KAI is 2.30x better at day 1 (52.5 vs 121.0), and averaged over leads 1-10 KAI is still ahead on every one of the six variables, by +6.8% on z500 and by +19.5% on t2m. This is the same short-lead-for-long-lead trade the rollout curriculum produces at 2.5 degrees, where valid_S1 degrades and valid_S10 improves over the same 27 epochs; the crossover is that trade made visible on a test set. Anyone who needs day 1-3 skill should not use this checkpoint. Main confound: the two evaluations are not verified to share a protocol - experiments/kai_1.5.csv carries no metadata whatsoever beyond lead time and channel index, so protocol agreement is assumed and unverified.",
+      "sections": [
+        {
+          "heading": "Evidence 1 - day 10, model vs KAI 1.5 (51 weekly 2020 initial conditions; fixed10_global_best_metrics.json vs experiments/kai_1.5.csv)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable",
+                "Model day-10 RMSE",
+                "KAI 1.5 day-10 RMSE",
+                "RMSE change",
+                "Model day-10 ACC",
+                "KAI 1.5 day-10 ACC"
+              ],
+              "rows": [
+                [
+                  "z500",
+                  "692.1",
+                  "799.4",
+                  "-13.4%",
+                  "0.522",
+                  "0.472"
+                ],
+                [
+                  "msl",
+                  "624.1",
+                  "730.1",
+                  "-14.5%",
+                  "0.477",
+                  "0.415"
+                ],
+                [
+                  "u850",
+                  "4.846",
+                  "5.855",
+                  "-17.2%",
+                  "0.419",
+                  "0.358"
+                ],
+                [
+                  "q700",
+                  "1.338e-3",
+                  "1.553e-3",
+                  "-13.8%",
+                  "0.395",
+                  "0.386"
+                ],
+                [
+                  "t850",
+                  "3.089",
+                  "3.437",
+                  "-10.1%",
+                  "0.415",
+                  "0.423 - KAI wins"
+                ],
+                [
+                  "t2m",
+                  "2.467",
+                  "2.615",
+                  "-5.7%",
+                  "0.411",
+                  "0.418 - KAI wins"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "Six RMSE wins, four ACC wins. The two ACC losses are the two temperature fields, and they are small (0.008 and 0.007 absolute); the RMSE wins on the same two fields are the smallest of the six (-10.1% and -5.7%). Ranked by day-10 RMSE win the order is u850 -17.2%, msl -14.5%, q700 -13.8%, z500 -13.4%, t850 -10.1%, t2m -5.7%. So the day-10 advantage is largest on wind, pressure and humidity and smallest on temperature - but note that q700 outranks z500, so this is not a clean dynamic-versus-thermodynamic split and should not be described as one. The model's own bootstrap 95% CI on day-10 z500 RMSE is 673.5 to 711.4 (1000 resamples, seed 42), so the KAI value of 799.4 sits well outside it - but that interval is over our 51 initial conditions only and is not a paired test against KAI. Both beat persistence at day 10 (z500 persistence 1088.9, msl 952.3, u850 7.284)."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 2 - the shape of the result: z500 RMSE by lead, and where the curves cross (same two sources)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Lead (days)",
+                "Model z500 RMSE",
+                "KAI 1.5 z500 RMSE",
+                "Model vs KAI"
+              ],
+              "rows": [
+                [
+                  "1",
+                  "121.0",
+                  "52.5",
+                  "+130.3%"
+                ],
+                [
+                  "2",
+                  "193.6",
+                  "102.0",
+                  "+89.8%"
+                ],
+                [
+                  "3",
+                  "269.7",
+                  "169.9",
+                  "+58.8%"
+                ],
+                [
+                  "4",
+                  "349.2",
+                  "257.6",
+                  "+35.5%"
+                ],
+                [
+                  "5",
+                  "429.5",
+                  "356.9",
+                  "+20.4%"
+                ],
+                [
+                  "6",
+                  "507.3",
+                  "460.1",
+                  "+10.3%"
+                ],
+                [
+                  "7",
+                  "576.7",
+                  "563.3",
+                  "+2.4%"
+                ],
+                [
+                  "8",
+                  "627.5",
+                  "651.8",
+                  "-3.7%"
+                ],
+                [
+                  "9",
+                  "661.8",
+                  "732.4",
+                  "-9.6%"
+                ],
+                [
+                  "10",
+                  "692.1",
+                  "799.4",
+                  "-13.4%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "The z500 crossover falls between day 7 and day 8 - day 7.36 by linear interpolation of the RMSE difference. That figure is z500-only and must not be quoted as a global switch point; the per-variable table below spans more than three days. The gap is not a small early offset: at day 1 the model's z500 error is 2.30x KAI's, and the model needs until day 8 to close a deficit it starts with. What the model actually has is a flatter error growth curve. Over leads 1 to 10 the model's z500 RMSE grows 5.7x (121.0 to 692.1) while KAI's grows 15.2x (52.5 to 799.4). That is the signature of rollout training: the model is optimised so that errors compound slowly, at the price of a worse single-step map."
+            },
+            {
+              "type": "table",
+              "columns": [
+                "Variable",
+                "Interpolated crossover (days)",
+                "First whole lead the model wins RMSE"
+              ],
+              "rows": [
+                [
+                  "u850",
+                  "5.88",
+                  "day 6"
+                ],
+                [
+                  "q700",
+                  "6.39",
+                  "day 7"
+                ],
+                [
+                  "msl",
+                  "6.80",
+                  "day 7"
+                ],
+                [
+                  "z500",
+                  "7.36",
+                  "day 8"
+                ],
+                [
+                  "t850",
+                  "7.77",
+                  "day 8"
+                ],
+                [
+                  "t2m",
+                  "8.90",
+                  "day 9"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "There is no single switch point. The spread is 5.88 to 8.90 days, just over three days wide, and it orders the same way the lead-averaged result does: the variables the model recovers earliest (u850, q700) are the ones where it loses least on the lead average, and t2m, which it does not win until day 9, is the worst lead-average loss. Any statement of the form 'the model wins after day N' is only true of one variable at a time."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 3 - averaged over leads 1-10 KAI wins every variable (model column verbatim from fixed10_global_best_summary.csv rmse_avg_1_10; KAI column is the mean of the ten CSV rows)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Variable",
+                "Model mean RMSE, leads 1-10",
+                "KAI 1.5 mean RMSE, leads 1-10",
+                "Model vs KAI"
+              ],
+              "rows": [
+                [
+                  "z500",
+                  "442.8",
+                  "414.6",
+                  "+6.8%"
+                ],
+                [
+                  "msl",
+                  "416.1",
+                  "395.3",
+                  "+5.3%"
+                ],
+                [
+                  "u850",
+                  "3.592",
+                  "3.568",
+                  "+0.7%"
+                ],
+                [
+                  "q700",
+                  "1.080e-3",
+                  "1.045e-3",
+                  "+3.3%"
+                ],
+                [
+                  "t850",
+                  "2.268",
+                  "1.981",
+                  "+14.5%"
+                ],
+                [
+                  "t2m",
+                  "1.901",
+                  "1.590",
+                  "+19.5%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "This is the honest summary line and it goes the other way from the day-10 table: on a lead-averaged basis KAI is ahead on all six variables, not just z500. The variable ordering is largely preserved between the two views while the sign flips - the fields where the model gains most at day 10 are the fields where it loses least on the lead average. Day-10 win magnitude descending: u850 17.2, msl 14.5, q700 13.8, z500 13.4, t850 10.1, t2m 5.7. Lead-average loss magnitude ascending: u850 0.7, q700 3.3, msl 5.3, z500 6.8, t850 14.5, t2m 19.5. The correspondence is close but not exact: msl and q700 swap places between the two lists. The endpoints are the clear cases - u850, with the largest day-10 win (-17.2%), is nearly a tie on average (+0.7%), while t2m, with the smallest day-10 win (-5.7%), is the worst lead-average loss (+19.5%). So 'we beat KAI at 1.5 degrees' is a statement about long lead only, and any claim stated without a lead qualifier is wrong."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 4 - the same trade is visible in training, at both resolutions (valid_S1 and valid_S10 columns of training_metrics.csv)",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "At 2.5 degrees, over the 27 curriculum epochs, valid_S10 improves from 0.21087 to 0.15204 (-27.9%) while valid_S1 degrades from the S1 base run's best value of 0.023362 to 0.026847 (+14.9%).",
+                "At 1.5 degrees the same pattern, same magnitudes: valid_S10 0.21910 to 0.15364 (-29.9%), valid_S1 from the S1 base best 0.026896 to 0.030812 (+14.6%).",
+                "Both valid_S1 figures are referenced to the S1 base run's best value, and the basis changes the number materially. Referenced instead to the curriculum's own epoch-1 valid_S1 the same degradation is +10.2% at 2.5 degrees (0.0243606 to 0.026847) and +9.1% at 1.5 degrees (0.0282502 to 0.030812). Every valid_S1 degradation percentage in this entry is base-best-referenced; state the baseline whenever the number is quoted, because the two conventions differ by about five percentage points. The base bests are both at epoch 100.",
+                "The mechanism is therefore not a 1.5 degree artefact. The curriculum trades single-step accuracy for rollout stability by construction, at both resolutions, by a consistent 14-15% on valid_S1 against the base best. The 1.5 degree crossover against KAI is just the first time that trade has been made visible against an external reference rather than against our own validation loss."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Cost - the 1.5 degree L3 h128 pipeline has run 38.6 h, about 3.4x the matched 2.5 degree runs (epoch_time and peak_gpu_memory columns of training_metrics.csv; node and edge counts from node_counts, edge_counts and grid_shape in each run's config_resolved.yaml)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Stage",
+                "1.5 deg (121x240)",
+                "2.5 deg (72x144)",
+                "Ratio"
+              ],
+              "rows": [
+                [
+                  "S1 base, 100 epochs",
+                  "12.12 h (436 s/epoch)",
+                  "3.63 h (131 s/epoch)",
+                  "3.34x"
+                ],
+                [
+                  "Curriculum S2-S10, 27 epochs",
+                  "26.45 h (3527 s/epoch)",
+                  "7.77 h (1035 s/epoch)",
+                  "3.40x"
+                ],
+                [
+                  "Pipeline total",
+                  "38.57 h",
+                  "11.40 h",
+                  "3.38x"
+                ],
+                [
+                  "Peak GPU memory, curriculum",
+                  "7.92 GB",
+                  "2.88 GB",
+                  "2.75x"
+                ],
+                [
+                  "L0 node count",
+                  "29,040",
+                  "10,368",
+                  "2.80x"
+                ],
+                [
+                  "Total nodes, all 4 graph levels",
+                  "38,700",
+                  "13,770",
+                  "2.81x"
+                ],
+                [
+                  "Total edges, all 4 graph levels",
+                  "317,280",
+                  "112,752",
+                  "2.81x"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "The GB label on peak GPU memory is not an assumption: src/trainer.py line 4160 populates the peak_gpu_memory column from cuda_peak_allocated_gb, so the stored values 7.9188 and 2.8815 are gigabytes by construction. Memory scales at 2.75x, close to the L0 node-count ratio of 2.80x, which is what a pure activation-size argument predicts. Wall clock scales at 3.38x, and every problem-size proxy lands near 2.81x rather than 3.38x: total nodes across the four graph levels are 38,700 vs 13,770 (2.810x) and total edges 317,280 vs 112,752 (2.814x). So there is a real gap of roughly 20% between how much bigger the problem is and how much longer it takes, and it is currently unexplained."
+            },
+            {
+              "type": "p",
+              "text": "HYPOTHESIS, not a measurement: the gap is data loading and lower GPU utilisation at the larger grid. Nothing in this entry tests that. training_metrics.csv records only epoch_time and peak_gpu_memory per epoch - there is no I/O timing, no profiler trace and no utilisation sampling in any file cited here, and competing explanations (kernel efficiency at the larger tensor shapes, memory-bandwidth limits, host-side graph handling, or contention from other jobs on the box) have not been ruled out. If the gap did turn out to be recoverable overhead, the arithmetic ceiling would be about 20% of 38.57 h, i.e. roughly 7 h - but that figure is conditional on a diagnosis nobody has made, and it should not be quoted as an available saving. What is measured and safe to use is the ratio itself: budget about 3.4x the 2.5 degree cost for any 1.5 degree experiment."
+            }
+          ]
+        },
+        {
+          "heading": "Tooling - what the two scripts do as they currently stand (scripts/plot_experiment_rmse_acc.py, scripts/run_1p5_eval_maps_comparison.sh)",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "experiments/kai_1.5.csv is a raw per-channel evaluation dump with columns lead_time,variable_idx,original_channel_idx,variable_name,rmse,acc - 737 data rows, 67 channels x 11 leads (0-10). The file is 738 lines including the header, which is the easy way to get the row count wrong. experiments/kai_2.5.csv is a curated 4-column file, variable,timestep,rmse,acc, 10 rows per variable starting at lead 1.",
+                "scripts/plot_experiment_rmse_acc.py handles both layouts. _read_kai_csv sniffs the header set, accepting either variable/timestep or lead_time/variable_name, and raises with an explicit message naming both expected column sets if it matches neither (lines 214-222). Both layouts normalise to (variable, timestep, rmse, acc).",
+                "It drops the raw layout's lead-0 identity rows (line 235). Precisely: all 67 lead-0 rows have rmse 0.0, and acc is 1.0 for 65 of the 67 - the exceptions are tisr (channel 62) at 0.9999952 and orog (channel 64) at 0.0, so 'rmse 0.0, acc 1.0' is a good description of the rows but not a literal one. Dropping them matters for more than tidiness: leaving them in would both drag every curve to the origin and make the baseline's lead grid 0-10 disagree with the model evaluations' 1-10, which _validate_leads rejects outright (line 295).",
+                "keep_variables narrows the 67-channel dump to the six headline variables so the per-channel dump does not flood the plots, and the narrowing is guarded by a non-empty check (lines 237-242) so it only applies when the baseline actually covers a requested variable - otherwise the full set is kept and the gap is reported by _select_variables rather than silently swallowed.",
+                "scripts/run_1p5_eval_maps_comparison.sh (271 lines) runs the four stages a 1.5 degree model needs end to end: climatology build, 10-day test rollout evaluation, bias maps, and the KAI comparison overlay. Stage-selectable via STAGES, with DRY_RUN and MODEL=all.",
+                "Scope note on this whole section: it describes the current source only. git is not usable in this environment (it reports 'fatal: not a git repository' even with the sandbox disabled, although .git/ exists), so the prior state of either script could not be checked, and this entry makes no claim about what they did or did not support before. Anyone wanting the before-and-after framing should cite the commit."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Protocol agreement is assumed and unverified, and this is the weakest link in the whole entry. What is known about our side: 51 initial conditions from the 2020 test split at stride 7 (52 requested, 51 selected), first 2020-01-02, last 2020-12-17, calendar-aware, climatology data/stats/kai_1p5_train_dayofyear_climatology.nc built day-of-year from the train split, bootstrap 1000 samples at 0.95 with seed 42. What is known about KAI's side: nothing. experiments/kai_1.5.csv has no header comment, no sidecar file, and no mention anywhere in the repo's markdown; experiments/README_requested_models.md documents kai 2p5 only. Its initial conditions, test year, and climatology are all unknown. If KAI used a different climatology the ACC comparison is invalid; if it used a different or larger IC set the RMSE comparison is noisier than the CIs suggest.",
+                "The ACC conventions do appear to match between our evaluation and kai_1.5.csv - both start near 0.99 at day 1 (model z500 0.98866, KAI 0.99778) and decay to about 0.5 at day 10 (0.522 vs 0.472). That is weak but real evidence the climatologies are compatible. It is not proof.",
+                "Trap for anyone reading the existing 2.5 degree figures: experiments/kai_2.5.csv uses a completely different ACC convention. Its day-1 z500 ACC is 0.78, decaying to 0.34 at day 10, against 0.998 to 0.472 for kai_1.5.csv on the same variable. A model curve starting at 0.99 overlaid on a baseline curve starting at 0.78 will look like a huge win that is purely a definitional artefact. Its RMSE values are also rounded to 2-3 significant figures (75, 110, 175, 265, ...). ACC overlays against kai_2.5.csv are not directly comparable and should not be read as skill differences.",
+                "Single seed, single test year (2020), single checkpoint. No seed-repeat exists for either the 1.5 degree base or the curriculum run, so none of the margins here have a run-to-run error bar - only a within-run bootstrap over initial conditions.",
+                "The 51 initial conditions are weekly and therefore serially correlated through the seasonal cycle; the bootstrap resamples them as if independent, which will make the CIs somewhat too narrow.",
+                "The crossover days are interpolated from ten discrete leads, not measured at sub-daily resolution, and they carry no uncertainty interval - no bootstrap was run on the crossover itself. Near the crossing the two curves are within a few percent of each other, so the interpolated days are point estimates on noisy differences and the ordering of adjacent variables (q700 6.39 vs msl 6.80, z500 7.36 vs t850 7.77) should not be over-read. The wide separation between the extremes, u850 at 5.88 and t2m at 8.90, is the robust part.",
+                "The evaluation JSON records no unit metadata for any variable - the per-variable metric blocks carry only name, variable_idx, channel, rmse and acc. The model and KAI numbers are compared as stored, on matching channel indices (z500 is channel 6 on both sides, and q700 20, t850 33, u850 45, t2m 60, msl 65 all match), so the ratios are meaningful even though the absolute units are undocumented.",
+                "The two sides are not matched on parameter count, training data, or compute. KAI's architecture and training budget are unknown, so nothing here attributes the difference to the curriculum rather than to capacity or data.",
+                "The 20% excess in the wall-clock ratio over the node and edge ratios is an observation with no diagnosis attached. It is listed in the Cost section as a hypothesis about I/O and utilisation, and it should be treated as an open question, not as a known implementation defect with a known fix."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "What to do with this",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Do not ship this checkpoint for day 1-3 forecasts. Serve the S1 base checkpoint from runs/s1only_1p5_l3_hidden128_base_100epoch_dense_l3k24 for short leads and the curriculum checkpoint at long leads; both checkpoints already exist. There is no single switch day - the per-variable crossovers span 5.88 (u850) to 8.90 (t2m) - so the switch has to be set per variable, or, if one global switch is required for all six, at day 9, which is the first whole lead at which the curriculum checkpoint leads on every variable.",
+                "Get the KAI protocol before quoting these margins externally. A single sentence documenting kai_1.5.csv's initial conditions and climatology would convert the strongest caveat in this entry into a verified comparison. Until then, state the assumption whenever the numbers are used.",
+                "Test whether the trade is a hyperparameter rather than a law: a lower LR or fewer epochs in the S2-S10 phase should move the crossovers earlier without giving up the day-10 win. The 14-15% valid_S1 degradation is consistent enough across both resolutions to be worth treating as a tunable dial rather than an inevitability - though that consistency is two runs, not a demonstration that the dial turns.",
+                "Add a lead-averaged and a short-lead metric to the tracked set. Day-10 RMSE alone selected a checkpoint that loses the lead average on all six variables; a scoreboard that shows only day 10 will keep making that selection.",
+                "Profile the 1.5 degree training loop before the next 1.5 degree run. Wall clock scales at 3.38x while nodes and edges scale at 2.81x, and nothing in the current logs explains the difference. One profiling run would establish whether the gap is I/O, utilisation, kernel efficiency or contention - which is the prerequisite for claiming any of it is recoverable. Do not budget the roughly 7 h implied by the gap until that measurement exists."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "runs/dense_l3k24_1p5_curriculum_S2toS10_3ep_initckpt/evaluation_test_weekly52/fixed10_global_best_metrics.json (per-lead model RMSE and ACC for all six variables, bootstrap CIs, and the full evaluation protocol block: 51 ICs selected of 52 requested, stride 7, 2020-01-02 to 2020-12-17, calendar_aware true, climatology path, bootstrap 1000/0.95/seed 42; external_baselines is empty so KAI is not embedded here, and no unit field appears in any per-variable metric block)",
+        "runs/dense_l3k24_1p5_curriculum_S2toS10_3ep_initckpt/evaluation_test_weekly52/fixed10_global_best_summary.csv (rmse_avg_1_10, rmse_day10, acc_day10, day-10 CIs and persistence RMSE, read verbatim)",
+        "experiments/kai_1.5.csv (KAI 1.5 reference: raw per-channel dump, 737 data rows = 67 channels x 11 leads 0-10, in a 738-line file counting the header; supplied every KAI RMSE and ACC value, the per-variable crossovers, and the lead-0 identity rows including the tisr 0.9999952 and orog 0.0 exceptions)",
+        "experiments/kai_2.5.csv (the divergent ACC convention: day-1 z500 ACC 0.78 decaying to 0.34, and rounded RMSE values 75/110/175/265)",
+        "runs/dense_l3k24_1p5_curriculum_S2toS10_3ep_initckpt/training_metrics.csv (27 epochs; epoch_time totalling 26.45 h, peak_gpu_memory 7.9188, valid_S1 and valid_S10 trajectories; the file carries no I/O or utilisation timing of any kind)",
+        "runs/s1only_1p5_l3_hidden128_base_100epoch_dense_l3k24/training_metrics.csv (100 epochs; 12.12 h, S1 base best valid_S1 0.026896 at epoch 100)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/training_metrics.csv (matched 2.5 degree curriculum: 7.77 h, peak_gpu_memory 2.8815, valid_S1 and valid_S10 for the resolution comparison; curriculum epoch-1 valid_S1 0.0243606)",
+        "runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/training_metrics.csv (matched 2.5 degree S1 base: 3.63 h, best valid_S1 0.023362 at epoch 100)",
+        "runs/dense_l3k24_1p5_curriculum_S2toS10_3ep_initckpt/config_resolved.yaml (grid_shape 121x240, level_shapes 121x240 / 61x120 / 31x60 / 16x30, hidden_dim 128, k_neighbors 8, kai_1p5 data paths, graph_1p5_121x240_k8_l3k24_hybrid_row_aware_L3_v4.pt; node_counts 29040/7320/1860/480 and edge_counts 232320/58560/14880/11520 giving the 38,700-node and 317,280-edge totals)",
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/config_resolved.yaml (2.5 degree comparator: grid_shape 72x144; node_counts 10368/2592/648/162 and edge_counts 82944/20736/5184/3888 giving the 13,770-node and 112,752-edge totals behind the 2.81x problem-size ratios)",
+        "src/trainer.py line 4160 (the peak_gpu_memory column is written from cuda_peak_allocated_gb, which is what makes the GB unit on the memory row sourced rather than assumed)",
+        "scripts/plot_experiment_rmse_acc.py (_read_kai_csv at lines 195-263: dual-layout header sniffing with an explicit raise at 214-222, lead-0 drop at 235, guarded keep_variables narrowing at 237-242, and _validate_leads raising on mismatched lead grids at 295)",
+        "scripts/run_1p5_eval_maps_comparison.sh (271 lines; the four-stage 1.5 degree post-training pipeline: clim, eval, maps, compare, with STAGES, DRY_RUN and MODEL=all)",
+        "experiments/README_requested_models.md line 150 (documents kai 2p5 as an external CSV baseline with no local checkpoint or training metadata; contains no entry for kai_1.5.csv, which is how the missing-protocol confound was established)"
+      ],
+      "references": [
+        {
+          "label": "Full run review dashboard for this checkpoint (published artifact)",
+          "url": "https://claude.ai/code/artifact/a1338244-29ad-405f-8484-25bb7e2e5d5c"
+        },
+        {
+          "label": "Rasp et al. (2024) - WeatherBench 2: A benchmark for the next generation of data-driven global weather models, JAMES (evaluation protocol, ACC definition and climatology choice - the standard this comparison is assuming both sides follow)",
+          "url": "https://arxiv.org/abs/2308.15560"
+        },
+        {
+          "label": "Lam et al. (2023) - GraphCast: Learning skillful medium-range global weather forecasting, Science 382 (autoregressive fine-tuning with progressively longer rollouts; the source of the short-lead-for-long-lead trade seen here)",
+          "url": "https://arxiv.org/abs/2212.12794"
+        },
+        {
+          "label": "Rasp et al. (2020) - WeatherBench: A benchmark dataset for data-driven weather forecasting, JAMES (original z500/t850 headline metrics and the persistence baseline)",
+          "url": "https://arxiv.org/abs/2002.00469"
+        }
+      ]
+    },
+    {
+      "id": "polar-graph-structure",
+      "title": "Polar MSL error is largely a graph-structure problem",
+      "date": "2026-07-15",
+      "status": "analysis",
+      "verdict": "Hypothesis: most of the MSL error concentrates at the poles because the lat-lon k-NN graph is structurally weak there. Assessment: very likely a major contributor. The polar receptive field per message-passing hop is provably ~6.7x smaller than at the equator and almost purely zonal, there are no cross-pole edges, and the error pattern matches — including over the Arctic, where MSL is a real (non-extrapolated) quantity. Two confounds explain part of the Antarctic signal: the ERA5 MSL-over-ice artifact and the cos(lat) loss downweighting.",
+      "sections": [
+        {
+          "heading": "Evidence 1 — where the MSL error sits (prev-best run, year-mean bias, area-weighted)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "Latitude band",
+                "Area share",
+                "Share of squared bias, day 1",
+                "Share of squared bias, day 10"
+              ],
+              "rows": [
+                [
+                  "90S–60S",
+                  "6.7%",
+                  "30.5%",
+                  "26.2%"
+                ],
+                [
+                  "60S–20S",
+                  "26.2%",
+                  "31.1%",
+                  "23.2%"
+                ],
+                [
+                  "20S–20N",
+                  "34.2%",
+                  "8.6%",
+                  "5.2%"
+                ],
+                [
+                  "20N–60N",
+                  "26.2%",
+                  "19.9%",
+                  "16.8%"
+                ],
+                [
+                  "60N–90N",
+                  "6.7%",
+                  "10.0%",
+                  "28.5%"
+                ]
+              ]
+            },
+            {
+              "type": "p",
+              "text": "By day 10, ~55% of the global area-weighted squared MSL bias sits poleward of 60 deg on 13% of the Earth (~4x over-represented at each pole). The zonal profile is elevated across the whole cap (~200–270 Pa poleward of 76 deg vs ~33 Pa in the tropics), not just at the last grid row. The Arctic blow-up matters most: Arctic MSL is real (ocean at sea level), so it cannot be blamed on the ERA5 reduction artifact. z500 shows the same southern-cap concentration (~3–4x); t2m much less (~2x) — dynamic fields that need horizontal transport suffer most, pointing at message passing rather than surface physics."
+            }
+          ]
+        },
+        {
+          "heading": "Evidence 2 — the graph is crippled at the poles (graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt, L0, k=8)",
+          "blocks": [
+            {
+              "type": "table",
+              "columns": [
+                "L0 row",
+                "Mean edge length",
+                "Same-row (zonal) edges",
+                "Mean meridional reach per hop"
+              ],
+              "rows": [
+                [
+                  "Equator (±1.25°)",
+                  "335 km",
+                  "25%",
+                  "208 km"
+                ],
+                [
+                  "±83.75°",
+                  "115 km",
+                  "75%",
+                  "70 km"
+                ],
+                [
+                  "±86.25°",
+                  "117 km",
+                  "67%",
+                  "93 km"
+                ],
+                [
+                  "Pole row (±88.75°)",
+                  "50 km",
+                  "86%",
+                  "40 km"
+                ]
+              ]
+            },
+            {
+              "type": "list",
+              "items": [
+                "A polar node gathers information from a ~6.7x smaller physical footprint per hop; k-NN by distance on a lat-lon grid degenerates to a 1-D zonal ring near the poles (zonal spacing ~10 km vs 278 km meridional). row_aware_knn (2 forced adjacent-row neighbors) softens but cannot fix this.",
+                "Zero cross-pole edges (0/1008 at both pole rows): nodes at 88.75N on opposite longitudes are ~275 km apart across the pole but dozens of hops apart in the graph. A polar low crossing the pole is structurally invisible.",
+                "The hierarchy inherits the anisotropy (L1–L3 are lat-lon coarsenings; polar mean edge stays ~1.4x shorter than average at every level) and L3 has no nodes poleward of 80 deg — the caps lose coarse coverage.",
+                "Diagnostics agree: L0 spectral gap lambda_2 = 0.00064 (very slow mixing).",
+                "Compounding: the training loss is pure cos(lat)-weighted MSE (src/losses.py LatitudeWeightedMSE), so pole rows get ~2% of an equator row's weight — standard practice (GraphCast does the same), but it means weak incentive on top of weak capacity."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Honest confounds",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "Antarctic MSL in ERA5 is partly an extrapolation artifact (pressure reduced to sea level through ~3 km of ice); every model shows large 'errors' there and no graph will fix that part. The Arctic signal is the clean smoking gun.",
+                "Polar MSL variability (annular modes) is naturally high, so some error concentration is expected even with a perfect graph.",
+                "Attribution estimate: Arctic blow-up mostly graph; Antarctic roughly half graph, half artifact + downweighting."
+              ]
+            }
+          ]
+        },
+        {
+          "heading": "Fix plan (ranked)",
+          "blocks": [
+            {
+              "type": "list",
+              "items": [
+                "1. Quick graph rebuild (days, edge-only, weight-compatible with existing checkpoints): (a) azimuth-stratified neighbor selection — nearest neighbor per compass sector instead of 8 nearest, making the receptive footprint isotropic at every latitude; (b) cross-pole stitching for rows poleward of ~85 deg (edges to antipodal-longitude nodes, or a virtual pole supernode connected to the top rings); (c) extend L3 nodes into the polar caps.",
+                "2. Structural fix (1–2 weeks): quasi-uniform spherical mesh processor, GraphCast-style icosahedral multimesh (or HEALPix / H3). Keep L0 lat-lon grid for encode/decode; replace L1–L3 lat-lon coarsenings with icosphere refinements. Node budgets line up: icosahedron levels have 162/642/2562 nodes and the current L3 already has 162.",
+                "3. Non-graph complement (hours): mask or downweight the msl loss over high orography (orog > ~1500 m) using the existing loss_channel_weighting infrastructure; sp is predicted anyway and is well-defined everywhere.",
+                "4. Measurement: add per-latitude-band RMSE to the evaluation so polar skill becomes a tracked metric — global RMSE barely moves even if the caps improve 2x (they are only 13% of the area).",
+                "Suggested sequence: do 1 + 3, warm-start from the current best S1 checkpoint, and A/B the polar-band RMSE. If the Arctic error drops substantially, that confirms the mechanism and justifies the icosahedral processor as the durable fix."
+              ]
+            }
+          ]
+        }
+      ],
+      "evidence_sources": [
+        "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt/visualizations_dashboard/yearmean_msl_day{01,05,10}_bias.npy (band shares, zonal profiles)",
+        "graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt (edge lengths, same-row fractions, cross-pole count, per level)",
+        "src/losses.py LatitudeWeightedMSE (pure cos-lat weighting)",
+        "runs/*/diagnostics_full_eval/final_full_diagnostics.json (L0 spectral gap, msl S10 variance ratio ~0.78)"
+      ],
+      "references": [
+        {
+          "label": "Lam et al. (2023) — GraphCast: Learning skillful medium-range global weather forecasting, Science 382 (icosahedral multimesh, motivation for uniform spherical resolution)",
+          "url": "https://arxiv.org/abs/2212.12794"
+        },
+        {
+          "label": "Keisler (2022) — Forecasting Global Weather with Graph Neural Networks (icosahedral GNN)",
+          "url": "https://arxiv.org/abs/2202.07575"
+        },
+        {
+          "label": "Price et al. (2025) — GenCast: Probabilistic weather forecasting with machine learning, Nature (same icosahedral mesh family)",
+          "url": "https://arxiv.org/abs/2312.15796"
+        },
+        {
+          "label": "Karlbauer et al. (2024) — DLWP-HPX: Advancing Parsimonious Deep Learning Weather Prediction Using the HEALPix Mesh, JAMES (HEALPix alternative)",
+          "url": "https://arxiv.org/abs/2311.06253"
+        },
+        {
+          "label": "Bonev et al. (2023) — Spherical Fourier Neural Operators, ICML (spectral-on-sphere alternative, no pole singularity by construction)",
+          "url": "https://arxiv.org/abs/2306.03838"
+        },
+        {
+          "label": "openclimatefix/graph_weather — open-source Keisler implementation on the H3 hexagonal mesh (the project this repo is named after)",
+          "url": "https://github.com/openclimatefix/graph_weather"
+        },
+        {
+          "label": "ECMWF — ERA5 data documentation (mean sea level pressure reduction over high orography)",
+          "url": "https://confluence.ecmwf.int/display/CKB/ERA5%3A+data+documentation"
+        }
+      ]
+    }
+  ]
+}

@@ -22,6 +22,44 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class NodewiseRefineMLP(nn.Module):
+    """Node-wise residual MLP used to ablate graph attention in one refine block."""
+
+    def __init__(
+        self,
+        dim: int,
+        expansion: int = 2,
+        dropout: float = 0.0,
+        residual_scale_init: float = 0.1,
+        learnable_residual_scale: bool = True,
+    ):
+        super().__init__()
+        dim = int(dim)
+        expansion = int(expansion)
+        hidden = dim * expansion
+        self.dim = dim
+        self.hidden_dim = hidden
+        self.expansion = expansion
+        self.dropout = float(dropout)
+        self.residual_scale_init = float(residual_scale_init)
+        self.learnable_residual_scale = bool(learnable_residual_scale)
+        self.norm = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, hidden),
+            nn.GELU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(hidden, dim),
+        )
+        scale = torch.tensor(float(residual_scale_init), dtype=torch.float32)
+        if learnable_residual_scale:
+            self.residual_scale = nn.Parameter(scale)
+        else:
+            self.register_buffer("residual_scale", scale)
+
+    def forward(self, x: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
+        return x + self.residual_scale.to(device=x.device, dtype=x.dtype) * self.mlp(self.norm(x))
+
+
 class LocalGraphAttention(nn.Module):
     """Fixed-k local graph attention over sorted incoming kNN edges."""
 
@@ -40,7 +78,13 @@ class LocalGraphAttention(nn.Module):
         self.edge_bias = nn.Linear(edge_dim, heads)
         self.out_proj = nn.Linear(dim, dim)
 
-    def forward(self, h: torch.Tensor, graph: GraphLevel) -> torch.Tensor:
+    def forward(
+        self,
+        h: torch.Tensor,
+        graph: GraphLevel,
+        diagnostics_collector: object | None = None,
+        diagnostics_name: str | None = None,
+    ) -> torch.Tensor:
         bsz, num_nodes, dim = h.shape
         if num_nodes != graph.num_nodes:
             raise ValueError(f"Expected {graph.num_nodes} nodes, got {num_nodes}")
@@ -65,6 +109,13 @@ class LocalGraphAttention(nn.Module):
         scores = ((q_tgt * (k_src + edge_k[None, ...])).sum(dim=-1) / math.sqrt(self.head_dim))
         scores = scores + edge_bias[None, ...]
         attn = torch.softmax(scores, dim=2)
+        if diagnostics_collector is not None and hasattr(diagnostics_collector, "add_attention"):
+            diagnostics_collector.add_attention(
+                diagnostics_name or "attention",
+                attn,
+                edge_index=graph.edge_index,
+                num_nodes=graph.num_nodes,
+            )
         out = (attn[..., None] * (v_src + edge_v[None, ...])).sum(dim=2)
         out = out.reshape(bsz, num_nodes, dim)
         return self.out_proj(out)
@@ -78,8 +129,18 @@ class LocalGraphAttentionBlock(nn.Module):
         self.norm2 = nn.LayerNorm(dim)
         self.mlp = MLP(dim, ratio=mlp_ratio)
 
-    def forward(self, h: torch.Tensor, graph: GraphLevel) -> torch.Tensor:
-        h = h + self.attn(self.norm1(h), graph)
+    def forward(
+        self,
+        h: torch.Tensor,
+        graph: GraphLevel,
+        diagnostics_collector: object | None = None,
+        diagnostics_name: str | None = None,
+    ) -> torch.Tensor:
+        h = h + self.attn(
+            self.norm1(h),
+            graph,
+            diagnostics_collector=diagnostics_collector,
+            diagnostics_name=diagnostics_name,
+        )
         h = h + self.mlp(self.norm2(h))
         return h
-

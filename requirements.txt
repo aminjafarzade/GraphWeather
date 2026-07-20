@@ -1,7 +1,8 @@
-torch>=2.1
-numpy>=1.23
-PyYAML>=6.0
-netCDF4>=1.6
-tqdm>=4.66
-matplotlib>=3.7
-cartopy>=0.22
+# Dependencies are declared in pyproject.toml (single source of truth).
+# `pip install -r requirements.txt` installs this package (editable) with all
+# runtime deps, so `import src` works without sys.path hacks.
+#   pip install -e '.[dev]'   # add dev tools (pytest)
+#
+# The dashboard has its own separate deps: dashboard/requirements.txt
+# For GPU training, install the torch build matching your CUDA driver first.
+-e .

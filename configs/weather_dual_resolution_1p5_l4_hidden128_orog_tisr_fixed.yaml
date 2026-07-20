@@ -1,0 +1,268 @@
+# 1.5-degree (121x240 = 29040 nodes, poles included) 5-level Graph U-Net, hidden 128.
+# Standard ceil-halving pyramid 120x240 -> 60x120 -> 30x60 -> 15x30 -> 8x15;
+# the coarsest level (120 nodes) sits at the same physical scale as the proven
+# 2.5-degree 4-level coarsest level. k=8 at every level, dense k=24 only at
+# the coarsest (the planned-L4 convention). Same optimizer as the 2.5-degree
+# winners (AdamW lr 1e-4 -> 3e-6 warmup-cosine, wd 1e-4, clip 0.5), same
+# rollout curriculum; orog copied + tisr overwritten with known future values,
+# both excluded from loss. The 15x30 -> 8x15 step is non-2x and uses the
+# proportional parent-index pooling maps.
+raw_1p5_l4_hidden128_orog_tisr_fixed:
+  lr: 1.0e-4
+  min_lr: 3.0e-6
+  weight_decay: 1.0e-4
+  scheduler: "warmup_cosine"
+  max_epochs: 50
+  max_train_batches: null
+  max_valid_batches: null
+  batch_size: 4
+  gradient_accumulation_steps: 3
+  num_data_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  enable_amp: true
+  amp_dtype: "auto_bf16_fp16"
+  max_gradient_norm: 0.5
+  log_cuda_memory: true
+  log_every_batches: 100
+
+  experiment_name: main_raw_1p5_b4_acc3_bf16_delta_l4_hidden128_orog_tisr_fixed
+  seed: 42
+  resolution_mode: 1p5
+  grid_height: 121
+  grid_width: 240
+  nettype: "graph_weather"
+  target: "default"
+  auto_build_graph: true
+  hidden_dim: 128
+  edge_dim: 6
+  num_heads: 4
+  k_neighbors: 8
+  hierarchy_type: standard
+  use_l4_ratio15: false
+  level_k_neighbors: [8, 8, 8, 8, 24]
+  graph_connectivity_strategy: "hybrid_row_aware_knn"
+  row_aware_knn:
+    enabled: true
+    interior_neighbors_from_north_row: 1
+    interior_neighbors_from_south_row: 1
+    polar_neighbors_from_adjacent_row: 2
+  encoder_blocks: 1
+  decoder_blocks: 1
+  model:
+    name: graph_weather_unet
+    input_channels: 134
+    output_channels: 67
+    hidden_dim: 128
+    num_heads: 4
+    head_dim: 32
+    k_neighbors: 8
+    use_l3: true
+    use_l4: true
+    num_graph_levels: 5
+    hierarchy_type: standard
+    level_names:
+      - L0
+      - L1
+      - L2
+      - L3
+      - L4
+    level_shapes:
+      - [121, 240]
+      - [61, 120]
+      - [31, 60]
+      - [16, 30]
+      - [8, 15]
+    level_k_neighbors: [8, 8, 8, 8, 24]
+    l0_blocks: 2
+    l1_blocks: 2
+    l2_blocks: 1
+    l3_blocks: 1
+    l4_blocks: 1
+    l3_refine_after_l4_blocks: 1
+    l2_refine_after_l3_blocks: 1
+    l1_refine_after_l2_blocks: 1
+    l0_refine_blocks: 1
+    mlp_ratio: 4.0
+    dropout: 0.0
+    attn_dropout: 0.0
+    drop_path: 0.0
+    pooling:
+      type: parent_index_meanmax
+      mean_type: area_weighted
+      include_max: true
+      projection: linear
+      validate_no_empty_parents: true
+  graph_gradient_weight: 0.0
+
+  pooling:
+    type: parent_index_meanmax
+    mean_type: area_weighted
+    include_max: true
+    projection: linear
+    validate_no_empty_parents: true
+  unpooling:
+    type: parent_index_gather
+    fuse_with_skip: true
+
+  dt: 1
+  n_history: 1
+  max_rollout_steps: 10
+  rollout_schedule: [1, 2, 4, 6, 8, 10]
+  rollout_stage_epochs: [3, 3, 8, 10, 12, 14]
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1, 2, 4, 6, 8, 10]
+  trainable_scope: "all"
+  checkpoint_metric: "valid_S10"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "final_horizon"
+  load_only_current_rollout: true
+  single_pass_multi_horizon_validation: true
+  save_best: true
+  save_last: true
+  save_stage_checkpoints: true
+
+  lr_schedule_type: "warmup_cosine"
+  warmup_epochs: 2
+  warmup_start_factor: 0.1
+  optimizer:
+    name: adamw
+    lr: 1.0e-4
+    weight_decay: 1.0e-4
+
+  training:
+    rollout_mode: "curriculum"
+    fixed_train_rollout_steps: 10
+    rollout_loss_weights: "uniform"
+    # 29040 nodes is ~2.8x the 2.5-degree activation footprint (~62 GB peak at
+    # S=10 without recompute). Fits the 98 GB sm_120 cards; set both flags to
+    # true when training on <=48 GB GPUs (e.g. L40S).
+    activation_checkpointing: false
+    checkpoint_rollout_steps: false
+
+  loss:
+    type: latitude_weighted_mse
+    exclude_variables: ["orog", "tisr"]
+    use_delta_normalization: true
+  spectral_loss:
+    enabled: false
+  diagnostics:
+    enabled: false
+  lead_conditioning:
+    enabled: false
+
+  use_delta_normalization: true
+  delta_stats_path: "data/stats/era5_67_1p5_delta_stats.npz"
+  recompute_delta_stats: false
+  delta_norm_center: false
+  delta_norm_eps: 1.0e-6
+
+  in_channels: &STATE_CHANNELS [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+  out_channels: *STATE_CHANNELS
+
+  normalization: "zscore"
+  add_grid: false
+  N_grid_channels: 0
+  gridtype: "sinusoidal"
+  add_noise: false
+  noise_std: 0.0
+  crop_size_x: null
+  crop_size_y: null
+  roll: false
+  orography: false
+  orography_path: null
+  require_static_features: false
+
+  extra_features:
+    enabled: false
+    spatial:
+      lat_lon_sincos: false
+      orography: false
+      land_sea_mask: false
+    temporal:
+      dayofyear_sincos: false
+      use_target_time: true
+    known_forcings:
+      enabled: false
+      variables: []
+    static_handling:
+      copy_variables: []
+      exclude_loss_variables: []
+      override_prediction_with_known: []
+
+  target_handling:
+    enabled: true
+    copy_variables: ["orog"]
+    known_future_variables: ["tisr"]
+    exclude_loss_variables: ["orog", "tisr"]
+
+  static_fields:
+    path: null
+    orography_name: "orog"
+    land_sea_mask_name: "lsm"
+  variable_metadata:
+    path: null
+
+  resolution_profiles:
+    1p5:
+      resolution_degrees: 1.5
+      grid_shape: [121, 240]
+      graph_path: "graphs/graph_1p5_k8_levelk8-8-8-8-24_hybrid_row_aware_v5.pt"
+      graph_builder: hybrid_row_aware_knn
+      level_shapes:
+        - [121, 240]
+        - [61, 120]
+        - [31, 60]
+        - [16, 30]
+        - [8, 15]
+      level_k_neighbors: [8, 8, 8, 8, 24]
+      pooling_map_strategy: proportional_parent_index
+      validate_graph: true
+      validate_parent_maps: true
+      train_data_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/train"
+      valid_data_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/val"
+      test_dataset_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/test"
+      global_means_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/stats/global_mean.npy"
+      global_stds_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/stats/global_std.npy"
+      delta_stats_path: "data/stats/era5_67_1p5_delta_stats.npz"
+      batch_size: 4
+      gradient_accumulation_steps: 3
+      max_gradient_norm: 0.5
+      enable_amp: true
+
+  exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
+  eval_checkpoint_path: null
+  eval_output_dir: null
+  eval_forecast_steps: [10]
+  eval_fixed_rollout_steps: 10
+  eval_compare_stage_checkpoints: false
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+    4: "best_ckpt_S4.tar"
+    6: "best_ckpt_S6.tar"
+    8: "best_ckpt_S8.tar"
+    10: "best_ckpt_S10.tar"
+  eval_global_best_checkpoint: "best_ckpt.tar"
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  n_initial_conditions: 5
+  climatology_path: null
+  compute_climatology: true
+  climatology_chunk_size: 128
+  eval_device: "cuda"
+  eval_plot_variables: []
+  eval_plot_format: "png"
+  plot_persistence: true
+  log_peak_memory: true
+  log_graph_stats: true
+  log_parent_child_counts: true
+  log_level_shapes: true
+  debug:
+    enabled: false
+    max_train_batches: null
+    max_valid_batches: null
+  save_checkpoint: true
+  resume: false
