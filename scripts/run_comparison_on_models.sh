@@ -68,7 +68,7 @@ read -r -a var_arr <<< "${VARIABLES//,/ }"
 
 LOG="${OUTPUT_DIR}/comparison_$(date +%Y%m%d_%H%M%S).log"
 
-cmd=(python scripts/plot_experiment_rmse_acc.py --experiments "${exps[@]}")
+cmd=("${PYTHON:-/lustre/home/ziya/miniconda3/envs/graphweather-cu128/bin/python}" scripts/plot_experiment_rmse_acc.py --experiments "${exps[@]}")
 if [[ "${#labels[@]}" -gt 0 && "${#labels[@]}" -eq "${#exps[@]}" ]]; then
   cmd+=(--labels "${labels[@]}")
 elif [[ "${#labels[@]}" -gt 0 ]]; then
