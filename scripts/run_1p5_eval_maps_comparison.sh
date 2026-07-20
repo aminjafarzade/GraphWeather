@@ -52,7 +52,7 @@ DEVICE="${DEVICE:-cuda}"
 
 # --- shared 1p5 settings --------------------------------------------------------
 CLIMATOLOGY="${CLIMATOLOGY:-data/stats/kai_1p5_train_dayofyear_climatology.nc}"
-KAI_CSV="${KAI_CSV:-experiments/kai_1.5.csv}"
+KAI_CSV="${KAI_CSV:-data/baselines/kai_1p5.csv}"
 KAI_LABEL="${KAI_LABEL:-KAI 1.5}"
 EVAL_VARIABLES="${EVAL_VARIABLES:-z500 t2m t850 msl q700 u850}"
 MAP_VARIABLES="${MAP_VARIABLES:-z500 t2m msl t850}"

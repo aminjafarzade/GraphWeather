@@ -143,7 +143,7 @@ priority-list match present.
   (full per-lead arrays). Not present in the `S{N}` CSVs.
 - **Climatology** — used only to define ACC anomalies; **no stored
   climatology-forecast RMSE/ACC curve exists.** Do not fabricate one.
-- **External reference** — `experiments/kai_2.5.csv`, columns
+- **External reference** — `data/baselines/kai_2p5.csv`, columns
   `variable,timestep,rmse,acc` (6 vars × ~10 leads, **2.5° only**). Expose as
   external baseline id `kai-2p5` with resolution tag `2p5`; attach a
   `resolution_mismatch` warning when overlaid on a run of another resolution.

@@ -4,7 +4,7 @@
 Scans runs/*/evaluation_test_weekly52/fixed10_global_best_metrics.json for every
 evaluated run (model + persistence per-lead RMSE/ACC), pulls diagnostics
 (power spectra, variance ratios, rollout curves) and config summaries, parses
-experiments/kai_2.5.csv as an external reference, and rewrites the section
+data/baselines/kai_2p5.csv as an external reference, and rewrites the section
 between the BEGIN/END GENERATED markers in the dashboard HTML.
 
 Usage:  python scripts/build_dashboard_data.py
@@ -22,7 +22,7 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HTML = os.path.join(ROOT, "experiments", "experiment_dashboard.html")
-KAI_CSV = os.path.join(ROOT, "experiments", "kai_2.5.csv")
+KAI_CSV = os.path.join(ROOT, "data", "baselines", "kai_2p5.csv")
 BEGIN = "// ==== BEGIN GENERATED DATA (build_dashboard_data.py) ===="
 END = "// ==== END GENERATED DATA ===="
 

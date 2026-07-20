@@ -31,7 +31,7 @@ DEFAULT_LABELS = [
     "Static forcing",
 ]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "experiments" / "comparison_l3_stage_static_rmse_acc"
-DEFAULT_KAI_CSV = PROJECT_ROOT / "experiments" / "kai_2.5.csv"
+DEFAULT_KAI_CSV = PROJECT_ROOT / "data" / "baselines" / "kai_2p5.csv"
 DEFAULT_VARIABLES = ["z500", "t2m", "t850", "msl", "q700", "u850"]
 EVAL_DIR_NAMES = [
     "evaluation_test_weekly52",
@@ -195,9 +195,9 @@ def _read_eval_data(eval_dir: Path, rollout_dir: Path) -> dict[str, Any]:
 def _read_kai_csv(path: Path, keep_variables: list[str] | None = None) -> dict[str, Any]:
     """Read a KAI baseline CSV in either accepted layout.
 
-    * curated  -- ``variable,timestep,rmse,acc``      (experiments/kai_2.5.csv)
+    * curated  -- ``variable,timestep,rmse,acc``      (data/baselines/kai_2p5.csv)
     * raw eval -- ``lead_time,variable_idx,original_channel_idx,variable_name,rmse,acc``
-                  (experiments/kai_1.5.csv, a full 67-channel evaluation dump)
+                  (data/baselines/kai_1p5.csv, a full 67-channel evaluation dump)
 
     Both normalise to (variable, timestep, rmse, acc). The raw layout's
     timestep-0 identity rows are dropped, and ``keep_variables`` restricts the

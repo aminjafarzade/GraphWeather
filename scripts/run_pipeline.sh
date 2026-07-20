@@ -57,7 +57,7 @@ STRIDE="${STRIDE:-7}"
 N_INITIAL_CONDITIONS="${N_INITIAL_CONDITIONS:-52}"
 START_TIMESTEP="${START_TIMESTEP:-1}"
 CLIMATOLOGY_PATH="${CLIMATOLOGY_PATH:-data/stats/2p5_train_dayofyear_climatology.nc}"
-KAI_CSV="${KAI_CSV:-experiments/kai_2.5.csv}"   # moved to data/baselines/kai_2p5.csv in P3.4
+KAI_CSV="${KAI_CSV:-data/baselines/kai_2p5.csv}"
 
 GRAPH_PATH="${GRAPH_PATH:-}"         # if set, the graph stage builds it when absent
 GRAPH_DATA="${GRAPH_DATA:-}"         # optional --data override for build_graph.py

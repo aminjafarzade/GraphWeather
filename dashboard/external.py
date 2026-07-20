@@ -2,9 +2,9 @@
 
 An external baseline is a long-format CSV. Two column layouts are accepted:
 
-* curated   — ``variable,timestep,rmse,acc``      (experiments/kai_2.5.csv)
+* curated   — ``variable,timestep,rmse,acc``      (data/baselines/kai_2p5.csv)
 * raw eval  — ``lead_time,variable_idx,original_channel_idx,variable_name,rmse,acc``
-              (experiments/kai_1.5.csv — a full per-channel evaluation dump)
+              (data/baselines/kai_1p5.csv — a full per-channel evaluation dump)
 
 Both are normalised to (variable, timestep, rmse, acc); the raw layout's
 timestep-0 identity rows are dropped. A baseline carries a declared resolution
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-KAI_CSV = REPO_ROOT / "experiments" / "kai_2.5.csv"
+KAI_CSV = REPO_ROOT / "data" / "baselines" / "kai_2p5.csv"
 
 # The curated 2.5° reference tracks these six headline variables; the 1.5°
 # reference is restricted to the same set so the two baselines stay symmetric
@@ -102,13 +102,13 @@ def default_externals(repo_root: Optional[Path] = None) -> list:
     """The built-in registry. Extend via create_app(externals=[...]) (Q2/P4)."""
     root = repo_root or REPO_ROOT
     out = []
-    kai = root / "experiments" / "kai_2.5.csv"
+    kai = root / "data" / "baselines" / "kai_2p5.csv"
     if kai.is_file():
         ext = load_external_csv(kai, id="kai-2p5", label="KAI (2.5° reference)",
                                 resolution="2p5")
         if ext is not None:
             out.append(ext)
-    kai_1p5 = root / "experiments" / "kai_1.5.csv"
+    kai_1p5 = root / "data" / "baselines" / "kai_1p5.csv"
     if kai_1p5.is_file():
         ext = load_external_csv(kai_1p5, id="kai-1p5", label="KAI (1.5° reference)",
                                 resolution="1p5", only_variables=REFERENCE_VARIABLES)

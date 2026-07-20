@@ -49,7 +49,7 @@ USE_CARTOPY="${USE_CARTOPY:-1}"
 CONVERT_Z_TO_HEIGHT="${CONVERT_Z_TO_HEIGHT:-0}"
 SAVE_ARRAYS="${SAVE_ARRAYS:-0}"
 
-KAI_CSV="${KAI_CSV:-experiments/kai_2.5.csv}"
+KAI_CSV="${KAI_CSV:-data/baselines/kai_2p5.csv}"
 KAI_LABEL="${KAI_LABEL:-kai 2p5}"
 if [[ "$EXPERIMENT_SET" == "l3" || "$EXPERIMENT_SET" == "l3_only" ]]; then
   INCLUDE_KAI_IN_EVAL="${INCLUDE_KAI_IN_EVAL:-0}"

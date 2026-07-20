@@ -82,7 +82,7 @@ the core contract.
    overlay/ranking views let you pick which evaluation to use.
 2. **Scan roots**: watch only `runs/`, or also `experiments/`?
    *Default: `runs/` only, configurable.*
-3. **External baseline resolution mismatch**: `kai_2.5.csv` is 2.5°-only —
+3. **External baseline resolution mismatch**: `kai_2p5.csv` is 2.5°-only —
    when overlaid on a 1.5° run, block or warn-and-allow?
    **DECIDED (warn):** warn-and-allow — attach a `resolution_mismatch` warning
    and still overlay the baseline; never block it.

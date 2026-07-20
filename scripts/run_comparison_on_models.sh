@@ -29,7 +29,7 @@ cd "${REPO_ROOT}"
 
 EXPERIMENTS="${EXPERIMENTS:-}"
 LABELS="${LABELS:-}"
-KAI_CSV="${KAI_CSV:-experiments/kai_2.5.csv}"
+KAI_CSV="${KAI_CSV:-data/baselines/kai_2p5.csv}"
 VARIABLES="${VARIABLES:-z500 t2m t850 msl q700 u850}"
 STAGE_DIR="${STAGE_DIR:-S10}"
 OUTPUT_DIR="${OUTPUT_DIR:-comparisons/comparison_rmse_acc}"

@@ -339,7 +339,7 @@ def _app_from_env() -> FastAPI:
     GW_DASH_RUNS_ROOT      runs root to watch (default: repo runs/)
     GW_DASH_SCAN_INTERVAL  sweep interval seconds (default 20)
     GW_DASH_EXTERNAL_CSV   extra external baselines, ';'-separated entries of
-                           "path,id,label,resolution" (kai_2.5.csv is built in)
+                           "path,id,label,resolution" (kai_2p5.csv is built in)
     """
     runs_root = os.environ.get("GW_DASH_RUNS_ROOT")
     interval = float(os.environ.get("GW_DASH_SCAN_INTERVAL", "20"))
