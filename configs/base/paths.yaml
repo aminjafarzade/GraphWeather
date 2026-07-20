@@ -1,0 +1,23 @@
+# configs/base/paths.yaml — data-path portability reference (P3).
+#
+# This file documents the environment variables that make data paths portable.
+# The config loader (src/config.py) expands ${VAR:-default} in every config
+# string value, so a path written as
+#
+#     train_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/train
+#
+# resolves to the default when the variable is unset (byte-identical to the old
+# hardcoded path) and to $GW_KAI_1P5_ROOT/train when it is set. See .env.example.
+#
+# NOTE: full config layering (a `base:` merge so experiment configs inherit these
+# paths instead of repeating them) is planned but NOT yet wired into the loader —
+# today this file is a reference, not an inherited layer. The 1.5-degree KAI
+# paths already use the ${...} form; the 2.5/5.625 paths are still literal.
+
+paths:
+  # Wired: the shared 1.5-degree KAI dataset root (train/valid/test + stats/).
+  GW_KAI_1P5_ROOT: /lustre/home/mahmed/Hydro/kai_1p5_data
+
+  # Documented pattern, not yet referenced by configs:
+  # GW_ERA5_ROOT:  /lustre/home/ziya/KAI_5/era5_67          # 2.5-degree ERA5-67
+  # GW_DATA_ROOT:  /lustre/home/ziya/KAI_5                   # generic data root

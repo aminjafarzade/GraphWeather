@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from typing import Any, Optional
 
@@ -9,6 +10,31 @@ import yaml
 
 from .architecture import normalize_model_config_dict
 from .resolution import apply_resolution_profile
+
+
+# Surgical environment-variable interpolation for config values (portability).
+# Only the explicit ``${VAR}`` / ``${VAR:-default}`` form is expanded — bare
+# ``$VAR`` is left untouched, so a value must opt in. When VAR is unset the
+# default (after ``:-``) is used, so configs that pin the default to the current
+# absolute path resolve byte-identically to before (see configs/base/paths.yaml
+# and .env.example). Set the env var to relocate data without editing configs.
+_ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_env_vars(value: Any) -> Any:
+    """Recursively expand ``${VAR}`` / ``${VAR:-default}`` in string values."""
+    if isinstance(value, str):
+        if "${" not in value:
+            return value
+        return _ENV_VAR_RE.sub(
+            lambda m: os.environ.get(m.group(1), m.group(2) if m.group(2) is not None else ""),
+            value,
+        )
+    if isinstance(value, dict):
+        return {k: _expand_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_vars(v) for v in value]
+    return value
 
 
 def normalize_training_config_dict(params: dict[str, Any]) -> dict[str, Any]:
@@ -278,6 +304,10 @@ class YParams:
                 value = None
             self.params[key] = value
         self.apply_resolution_mode(resolution_mode)
+        # Expand ${VAR:-default} in all (possibly profile-injected) string values
+        # last, so env-overridable paths work everywhere. No-op when no ${...}.
+        self.params = _expand_env_vars(self.params)
+        self._sync_attrs()
         if print_params:
             for key, value in self.params.items():
                 print(key, value)
