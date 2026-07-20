@@ -1,0 +1,82 @@
+Graph configuration:
+  num_graph_levels: 4
+  level_k_neighbors: [8, 8, 8, 24]
+  edge_counts: [82944, 20736, 5184, 3888]
+  graph_path: /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
+
+GraphWeather model config:
+  use_l3: true
+  use_l4_ratio15: false
+  hierarchy_type: standard
+  num_graph_levels: 4
+  hidden_dim: 160
+  num_heads: 5
+  head_dim: 32
+  k_neighbors: 8
+  level_k_neighbors: [8, 8, 8, 24]
+  skip_fusion: {'type': 'default', 'init_scale': 1.0, 'max_scale': 2.0}
+  pooling: {'type': 'default', 'init_scale': 1.0, 'max_scale': 2.0, 'mean_type': 'mean', 'include_max': True}
+  l0_refine: {'type': 'attention', 'mlp_expansion': 2, 'dropout': 0.0, 'residual_scale_init': 0.1, 'learnable_residual_scale': True}
+  lead_conditioning: {'enabled': False, 'type': 'none', 'max_lead': 0, 'added_input_channels': 0}
+  l0_blocks: 2
+  l1_blocks: 2
+  l2_blocks: 1
+  l3_blocks: 1
+  l4_blocks: 1
+  l3_refine_after_l4_blocks: 1
+  l2_refine_after_l3_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  trainable_parameters: 3844932
+
+Skip fusion:
+  type: default
+  init_scale: 1.0
+  max_scale: 2.0
+
+Pooling:
+  type: default
+  mean_type: mean
+  include_max: True
+  init_scale: 1.0
+  max_scale: 2.0
+
+L0 refine:
+  type: attention
+  mlp_expansion: 2
+  dropout: 0.0
+  residual_scale_init: 0.1
+  learnable_residual_scale: true
+
+Lead conditioning:
+  enabled: false
+  type: none
+  max_lead: 0
+  added_input_channels: 0
+
+Spectral loss:
+  enabled: false
+Training rollout configuration:
+  rollout_mode: curriculum
+  training_rollout_steps: 2
+  backprop_through_rollout: true
+  detach_between_rollout_steps: false
+  rollout_loss_weights: uniform
+  activation_checkpointing: True
+  checkpoint_rollout_steps: True
+  batch_size: 4
+  gradient_accumulation_steps: 3
+  effective_batch_size: 12
+  log_every_batches: 100
+Resolution mode: 2p5
+Grid shape: [72, 144]
+Hidden dimension: 160
+Input channels: 134
+Output channels: 67
+Graph path: /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
+Target handling:
+  enabled: true
+  copy_variables: ['orog']
+  known_future_variables: []
+  exclude_loss_variables: ['orog']
+Loss channels: 66/67

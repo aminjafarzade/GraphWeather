@@ -203,7 +203,15 @@ def main() -> None:
     else:
         run_base = config_name if mode in config_name else f"{config_name}_{mode}"
         run_name = f"{run_base}_{args.run_num}"
-    exp_dir = os.path.abspath(os.path.join(params.exp_dir, run_name))
+    # Guard the self-nesting bug (A1.2): if exp_dir already points AT the run dir
+    # (a config baked exp_dir=runs/<name> rather than just runs/), don't re-append
+    # run_name — that produced empty runs/<name>/<name>/ dirs. Normal paths
+    # (exp_dir=runs or experiments) are unaffected: their basename != run_name.
+    exp_dir_base = os.path.abspath(params.exp_dir)
+    if os.path.basename(exp_dir_base) == run_name:
+        exp_dir = exp_dir_base
+    else:
+        exp_dir = os.path.join(exp_dir_base, run_name)
     os.makedirs(exp_dir, exist_ok=True)
     params["name"] = run_name
     params["experiment_dir"] = exp_dir

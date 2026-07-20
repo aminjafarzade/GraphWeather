@@ -6,6 +6,13 @@
 # --- Trained models, checkpoints, and all per-experiment analysis outputs ----
 # (11 GB; produced by training / evaluation / diagnostics — regenerate locally)
 experiments/
+# P4: compat symlink -> archive/experiments/ (own line; .gitignore has no inline comments)
+/experiments
+
+# --- Frozen legacy tree + release bundles (P4): moved under archive/, ignored.
+# archive/scripts/ and archive/configs/ hold small retired CODE and stay TRACKED.
+/archive/experiments/
+/archive/zips/
 
 # --- Fresh output roots for NEW runs (keep the empty dirs, exclude contents) --
 # New experiments land in runs/, comparison figures in comparisons/.

@@ -182,6 +182,12 @@ def main() -> None:
         else:
             params["test_dataset_path"] = params.get("test_dataset_path", params.valid_data_path)
     if args.output_dir:
+        # Reject a bare integer (A1.3): a caller once passed an index, producing
+        # experiments/0, /1, /2. Eval output dirs must be descriptive.
+        if args.output_dir.strip().lstrip("-").isdigit():
+            raise SystemExit(
+                f"--output_dir must be a descriptive path, not a bare integer: {args.output_dir!r}"
+            )
         params["eval_output_dir"] = args.output_dir
     forecast_steps = _parse_forecast_steps(args.forecast_steps)
     if forecast_steps is not None:
