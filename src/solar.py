@@ -1,5 +1,10 @@
 """Analytic top-of-atmosphere incident solar radiation (``tisr``).
 
+STATUS (P5.3): additive, NOT yet wired into the production training/eval path
+(which reads true tisr from the target sequence). The only importer is
+tests/test_solar.py; this is the planned real-inference forcing provider — do
+not remove as dead code.
+
 REAL-INFERENCE INTERFACE for the prescribed-solar-forcing path. During training
 and evaluation the true ``tisr`` for each rollout step's valid time is taken
 from the target sequence (``target_handling.known_future_variables``). At real

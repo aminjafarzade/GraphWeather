@@ -1,5 +1,9 @@
 """Typed, read-only projection over an already-resolved config dict.
 
+STATUS (P5.3): additive, NOT yet wired into production. The only importer is
+tests/test_config_schema_projection.py; YParams does not use this projection yet.
+Kept intentionally as a staged typed read-model — do not remove as dead code.
+
 Governing principle (why this is behavior-preserving): the five reducers that
 resolve a config -- ``apply_resolution_profile`` -> ``normalize_model_config_dict``
 -> ``normalize_training_config_dict`` -> ``normalize_target_handling_config_dict``

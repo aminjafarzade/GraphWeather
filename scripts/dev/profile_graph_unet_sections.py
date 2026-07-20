@@ -12,7 +12,7 @@ from typing import Any
 import torch
 
 script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parent
+project_root = script_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config import YParams, setup_logging

@@ -5,8 +5,9 @@
 
 # --- Trained models, checkpoints, and all per-experiment analysis outputs ----
 # (11 GB; produced by training / evaluation / diagnostics — regenerate locally)
-experiments/
-# P4: compat symlink -> archive/experiments/ (own line; .gitignore has no inline comments)
+# ANCHORED to the repo root: a bare `experiments/` also matched configs/experiments/
+# and docs/experiments/ (source dirs that MUST be tracked). `/experiments` covers
+# both the old dir and the P4 compat symlink -> archive/experiments/.
 /experiments
 
 # --- Frozen legacy tree + release bundles (P4): moved under archive/, ignored.

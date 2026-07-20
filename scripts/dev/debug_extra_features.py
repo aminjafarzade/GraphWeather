@@ -16,7 +16,7 @@ import torch
 import sys
 
 script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parent
+project_root = script_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 Path(os.environ.setdefault("XDG_CACHE_HOME", "/tmp")).mkdir(parents=True, exist_ok=True)
