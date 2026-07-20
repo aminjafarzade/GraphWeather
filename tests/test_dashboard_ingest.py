@@ -320,6 +320,32 @@ class SyntheticFixtureTest(unittest.TestCase):
         records = ingest.ingest_all(self.root)
         self.assertEqual([r.run_id for r in records], ["realrun"])
 
+    def test_run_without_run_json_still_parses(self) -> None:
+        """run.json is optional/additive: a run lacking it ingests normally.
+        The scanner keys on config_resolved.yaml, never on run.json."""
+        run_dir = make_run(self.root, "norunjson", payload=make_payload())
+        self.assertFalse((run_dir / "run.json").exists())
+        run = self._ingest_one("norunjson")
+        self.assertEqual(run.status, "evaluated")
+        self.assertTrue(run.evaluations[0].is_valid)
+
+    def test_run_json_manifest_is_ignored_by_scanner(self) -> None:
+        """The run.json manifest written by run_full_pipeline.sh is additive:
+        its presence must not change run detection, status, or add problems."""
+        run_dir = make_run(self.root, "withrunjson", payload=make_payload())
+        (run_dir / "run.json").write_text(json.dumps({
+            "schema": "gw-run-manifest/1", "status": "complete",
+            "resolution": "2p5", "config_name": "withrunjson", "config": "c.yaml",
+            "seed": 777, "horizon": 10, "git_sha": "abc1234",
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "finished_at": "2026-01-01T01:00:00+00:00",
+        }))
+        run = self._ingest_one("withrunjson")
+        self.assertEqual(run.run_id, "withrunjson")
+        self.assertEqual(run.status, "evaluated")
+        self.assertTrue(run.evaluations[0].is_valid)
+        self.assertFalse(any(p.severity == "error" for p in run.problems))
+
     def test_diagnostics_csvs_with_string_columns_parse(self) -> None:
         """Regression: identifier columns (phase, layer_name, backend) must never
         crash the diagnostics reader; malformed rows are skipped, not fatal."""

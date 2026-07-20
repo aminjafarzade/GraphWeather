@@ -26,7 +26,12 @@ logs/
 # --- Data & normalization stats (large; provide/regenerate locally) ----------
 # ERA5 data lives outside the repo; delta stats + climatology are rebuilt via
 # scripts/build_climatology.py and the delta-stats path in the config.
-data/
+# EXCEPTION: data/baselines/ is TRACKED (small KAI reference CSVs consumed by the
+# plotter + dashboard). Uses data/* (not data/) so the baselines dir can be
+# re-included — git cannot re-include under a fully-excluded parent dir.
+data/*
+!data/baselines/
+!data/baselines/*.csv
 
 # --- Graphs (auto-built at runtime via auto_build_graph: true) ----------------
 graphs/

@@ -1,861 +1,93 @@
-# GraphWeather5p625
+# GraphWeather
 
-Self-contained direct-grid spherical Graph U-Net prototype for weather forecasting on 5.625-degree and 2.5-degree latitude/longitude grids.
+A direct-grid spherical **Graph U-Net** for medium-range weather forecasting on
+latitude/longitude grids. The model works on the native grid (no mesh regridding),
+predicts a tendency `delta` and returns `x_current + delta`, and is trained with an
+autoregressive rollout curriculum.
 
-This package does not import from `GNN/KAI-Atmos`. It keeps a similar user interface: YAML configs, `scripts/train.py`, KAI-style NetCDF data loading, experiment folders, logs, and checkpoints.
+Current work runs at **2.5° (`2p5`)** and **1.5° (`1p5`)** resolution with the
+**L3/L4** depth variants (4–5 graph levels), **hidden dim 128 or 160**, **dense
+row-aware graphs**, and a rollout **curriculum** (S1 base → S2…S10, often
+warm-started from an S1 checkpoint). The original 3-level, hidden-96, ~1.13M-param
+5.625° model is the historical baseline, not the current model.
 
-## What This Version Implements
+> **Repo name.** The directory is still `GraphWeather5p625` for historical reasons;
+> the active resolutions are 2p5/1p5. A rename is deferred (high blast radius).
 
-This version supports the original 5.625-degree model and a direct 2.5-degree baseline. Both modes use the same Graph U-Net architecture; only the graph/data resolution changes.
+## Documentation
 
-- `5p625` mode uses `32 x 64 = 2048` native nodes.
-- `2p5` mode uses `72 x 144 = 10368` native nodes.
-- Both modes build exactly three graph levels, with no L3:
-  - `L0: 32 x 64 = 2048`
-  - `L1: 16 x 32 = 512`
-  - `L2: 8 x 16 = 128`
-- In `2p5` mode the levels are:
-  - `L0: 72 x 144 = 10368`
-  - `L1: 36 x 72 = 2592`
-  - `L2: 18 x 36 = 648`
-- Uses directed hybrid row-aware spherical kNN edges with `k=8`.
-- Keeps input channels `134`, output channels `67`, hidden dimension `96`, and trainable parameters `1,131,103` in both modes.
-- Predicts a tendency `delta`, then returns `x_current + delta`.
-- Supports unchunked autoregressive rollout training.
-- Uses daily rollout defaults capped at `S=10`, because the current KAI_5 files are daily.
-- Fixes misleading validation by validating at the current training rollout when configured.
-- Adds multi-horizon validation logs such as `valid_S1`, `valid_S2`, `valid_S4`, `valid_S6`, `valid_S8`, `valid_S10`.
-- Adds rollout-stage-aware LR scheduling so LR can decrease as rollout length increases.
-- Saves global and rollout-stage-specific best checkpoints with metadata.
-- Fixes stage-comparison plots so `trained S=4` means a checkpoint trained during the S=4 rollout stage, evaluated with the same fixed rollout horizon as the other checkpoints.
+| Guide | Covers |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Graph U-Net, graph levels, L3/L4 variants, delta prediction |
+| [docs/data.md](docs/data.md) | Resolutions, NetCDF layout, stats, KAI baselines, the 1p5 pole-less trap |
+| [docs/pipeline.md](docs/pipeline.md) | Environment, the `run_full_pipeline.sh` golden path, training & curriculum |
+| [docs/evaluation.md](docs/evaluation.md) | RMSE/ACC eval, WeatherBench2 backend, stage comparison, zone dominance |
+| [docs/dashboard.md](docs/dashboard.md) | The results dashboard + its `gw-run/1` data contract |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Repo conventions: naming, layout, config layering, run/dashboard invariants |
 
-The architecture itself is not tied to a specific experiment folder. The included `experiments/*/out.log` files are only logs from previous smoke/full runs. Checkpoint `.tar` files are intentionally not included in the zip archive.
+## Quickstart
 
-## Repository Layout
+```bash
+# Python 3.10+. Install the package (editable) + dev tools.
+pip install -e '.[dev]'
+```
+
+For GPU training, install the torch build matching your CUDA driver first. On the
+sm_120 box use the pinned `graphweather-cu128` interpreter — do not assume bare
+`python` (it silently misbehaves under the wrong env). See
+[docs/pipeline.md](docs/pipeline.md).
+
+Run a full experiment (train → eval → plot → maps → diagnostics) via the launcher:
+
+```bash
+CONFIG=configs/experiments/<id>.yaml \
+CONFIG_NAME=<id> \
+bash scripts/run_full_pipeline.sh
+```
+
+Every stage is individually toggleable (`RUN_TRAIN`, `RUN_EVAL`, `RUN_PLOT`,
+`RUN_QUALITATIVE`, `RUN_DIAGNOSTICS`); `DRY_RUN=1` prints commands without running
+them. The result lands in `runs/<id>/` (see [docs/pipeline.md](docs/pipeline.md)).
+
+## Results dashboard
+
+`dashboard/` is a standalone FastAPI + SPA app that scans `runs/` and presents each
+run's metrics, diagnostics, and qualitative maps. It reads runs verbatim (never
+imports `src/`, never writes into `runs/`).
+
+```bash
+pip install -r dashboard/requirements.txt   # separate from the main deps
+python -m dashboard.ingest --once --json     # inspect ingested run records
+```
+
+Its data contract (`gw-run/1`) is documented in
+[dashboard/docs/](dashboard/docs/) and summarized in
+[docs/dashboard.md](docs/dashboard.md). A directory is a "run" iff it contains
+`config_resolved.yaml`; that invariant must be preserved by any run-storage change.
+
+## Repository layout
 
 ```text
-GraphWeather5p625/
-  configs/gnn_5p625.yaml       # training configs
-  configs/weather_dual_resolution.yaml  # 5p625/2p5 switchable config
-  graphs/graph_5p625_k8_hybrid_row_aware_v2.pt  # 5.625-degree graph bundle
-  graphs/graph_2p5_k8_hybrid_row_aware_v2.pt    # 2.5-degree graph bundle
-  scripts/build_graph.py       # graph builder CLI
-  scripts/evaluate.py          # RMSE/ACC evaluation CLI
-  scripts/train.py             # training CLI
-  src/
-    batch_adapter.py           # grid <-> node conversion
-    config.py                  # YAML loader and logging
-    data.py                    # KAI-style NetCDF dataset
-    graph_builder.py           # spherical graph construction
-    graph_bundle.py            # graph bundle loading
-    layers.py                  # local graph attention blocks
-    losses.py                  # latitude-weighted MSE and graph-gradient helper
-    models.py                  # GraphWeatherModel
-    pooling.py                 # mean/max pool and parent unpool
-    processor.py               # Graph U-Net processor
-    evaluator.py               # per-variable RMSE/ACC rollout evaluation
-    trainer.py                 # training, validation, LR schedule, checkpoints
-  requirements.txt
-  README.md
+src/          library code (import as the `src` package)
+scripts/      CLIs: train.py, evaluate.py, plot_*, visualize_*, run_full_pipeline.sh
+configs/      YAML configs (base + experiments)
+tests/        regression net (fast no-GPU lane + torch-heavy lane; see CONTRIBUTING §9)
+dashboard/    results dashboard (FastAPI + SPA) + dashboard/docs (data contract)
+docs/         reference guides (this table) + docs/experiments (specs)
+runs/         experiment outputs (git-ignored except .gitkeep)
+data/         stats/ (regenerable, ignored) + baselines/ (tracked KAI CSVs)
+graphs/       auto-built graph bundles (ignored)
 ```
 
-## Environment Setup
-
-Use Python 3.10 or newer.
-
-### Option A: conda
+## Tests
 
 ```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
+# Fast lane (no GPU): dashboard contract + config/resolution invariants
+pytest tests/test_dashboard_*.py tests/test_config_*.py \
+       tests/test_resolution*.py tests/test_zone_rmse_dominance.py
 
-conda create -n graphweather5p625 python=3.10 -y
-conda activate graphweather5p625
-
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+# Full lane (needs a GPU box for the torch-heavy tests)
+pytest tests/
 ```
 
-### Option B: venv
-
-```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
-python3.10 -m venv .venv
-source .venv/bin/activate
-
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-For GPU training, install the PyTorch build that matches your CUDA driver if the default wheel is not suitable. The rest of the dependencies are listed in `requirements.txt`.
-
-The rollout map visualization requires Cartopy. If `pip install -r requirements.txt` cannot build Cartopy cleanly on your system, install it from conda-forge with `conda install -c conda-forge cartopy`.
-
-## Data Expected
-
-The default config points to:
-
-```text
-/lustre/home/ziya/KAI_5/kai_data_5p625/train
-/lustre/home/ziya/KAI_5/kai_data_5p625/valid
-/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy
-/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy
-```
-
-Each NetCDF file is expected to contain:
-
-```text
-fields[time, channel, latitude, longitude]
-```
-
-The included KAI_5 files are daily. With these files, `dt: 1` means one forecast day, and `S=10` means a 10-day rollout.
-
-If your data lives elsewhere, edit `train_data_path`, `valid_data_path`, `global_means_path`, and `global_stds_path` in `configs/gnn_5p625.yaml`.
-
-## Dual-Resolution Mode
-
-Use `configs/weather_dual_resolution.yaml` when switching by one config value or CLI argument:
-
-```bash
-python scripts/train.py \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 5p625 \
-  --run_num rowaware_5p625
-
-python scripts/train.py \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 2p5 \
-  --run_num baseline_2p5
-```
-
-Supported aliases are `5.625`, `5p625`, `5deg625`, `2.5`, `2p5`, and `2deg5`.
-
-The active profile controls data paths, graph path, batch size, and gradient accumulation:
-
-```text
-5p625: grid 32 x 64, batch_size 12, gradient_accumulation_steps 1
-2p5:   grid 72 x 144, batch_size 2,  gradient_accumulation_steps 6
-```
-
-The 2.5-degree profile expects separate 2.5-degree NetCDF files and normalization statistics. Do not reuse 5.625-degree statistics for `2p5`; the loader validates grid shape and channel-count compatibility.
-
-Graph sizes with `k=8`:
-
-```text
-5p625: nodes [2048, 512, 128], edges [16384, 4096, 1024]
-2p5:   nodes [10368, 2592, 648], edges [82944, 20736, 5184]
-```
-
-The 2.5-degree baseline is direct resolution scaling only. It does not add a coarser graph level, static features, mesh nodes, hidden dimensions, or extra blocks. Runtime and activation memory are higher because there are more nodes, but the model weights are unchanged.
-
-## Build Or Rebuild The Graph
-
-The archive includes mode-specific row-aware graph bundles. Rebuild them only if you change the grid, coordinates, or graph settings:
-
-```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
-python scripts/build_graph.py \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 5p625 \
-  --force_rebuild
-
-python scripts/build_graph.py \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 2p5 \
-  --force_rebuild
-```
-
-## Smoke Tests
-
-Basic 2-epoch smoke run:
-
-```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
-python scripts/train.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config smoke_5p625 \
-  --run_num smoke01
-```
-
-Rollout/LR validation smoke run:
-
-```bash
-python scripts/train.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config smoke_rollout_lr_5p625 \
-  --run_num smoke_rollout_lr01
-```
-
-Expected behavior for `smoke_rollout_lr_5p625`:
-
-```text
-Epoch 1 ... train ... S=1 | valid ... S=1 | valid_S1 ... valid_S2 ... | lr 1.00e-04
-Epoch 2 ... train ... S=2 | valid ... S=2 | valid_S1 ... valid_S2 ... | lr 7.00e-05
-```
-
-Partial fine-tune smoke run, training only decoder and output head:
-
-```bash
-python scripts/train.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config smoke_finetune_head_5p625 \
-  --run_num smoke_head01
-```
-
-## Full Training
-
-The `raw_5p625` config is set for 150 epochs:
-
-```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
-python scripts/train.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config raw_5p625 \
-  --run_num full150
-```
-
-Default daily rollout schedule:
-
-```yaml
-max_rollout_steps: 10
-rollout_schedule: [1, 2, 4, 6, 8, 10]
-rollout_stage_epochs: [5, 5, 10, 10, 10, 10]
-```
-
-After the listed stages finish, training remains at `S=10`.
-
-Default rollout-stage LR schedule:
-
-```yaml
-lr_schedule_type: rollout_stage
-lr_by_rollout:
-  1: 1.0e-4
-  2: 1.0e-4
-  4: 7.0e-5
-  6: 6.0e-5
-  8: 5.0e-5
-  10: 3.0e-5
-warmup_epochs: 1
-```
-
-The training loop writes:
-
-```text
-best_ckpt.tar       # global best using checkpoint_metric, usually valid_S10
-best_ckpt_S1.tar    # best checkpoint during the S=1 training stage
-best_ckpt_S2.tar
-best_ckpt_S4.tar
-best_ckpt_S6.tar
-best_ckpt_S8.tar
-best_ckpt_S10.tar
-last_ckpt.tar
-ckpt.tar
-```
-
-## Validation Behavior
-
-Main validation loss is controlled by:
-
-```yaml
-validate_with_train_rollout: true
-valid_rollout_steps: 1
-eval_rollout_steps: [1, 2, 4, 6, 8, 10]
-checkpoint_metric: valid_S10
-stage_checkpoint_metric_mode: stage_horizon
-```
-
-When `validate_with_train_rollout: true`, the main validation loss uses the same rollout length as training for that epoch. Multi-horizon validation still logs every horizon listed in `eval_rollout_steps`.
-
-When `validate_with_train_rollout: false`, the main validation loss uses `valid_rollout_steps`, while multi-horizon validation remains optional.
-
-`valid_S10` means the average validation loss over a 10-step autoregressive rollout. `valid_S10_final` means the validation loss at only the final 10th lead step. `best_ckpt.tar` is selected using `checkpoint_metric`, normally `valid_S10`. `best_ckpt_S4.tar` means the best checkpoint saved during epochs where the training rollout stage was S=4.
-
-For stage-specific checkpoints, `stage_checkpoint_metric_mode: stage_horizon` selects `best_ckpt_S4.tar` using `valid_S4`. `stage_checkpoint_metric_mode: final_horizon` selects every stage checkpoint using the final horizon metric, normally `valid_S10`.
-
-## Per-Variable RMSE And ACC Evaluation
-
-After training, run the standalone evaluator with the same config that was used for the checkpoint. Evaluation uses a fixed autoregressive rollout horizon. For final reports, evaluate one checkpoint for 10 days:
-
-```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
-python scripts/evaluate.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config raw_5p625 \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
-  --output_dir experiments/raw_5p625_full150/evaluation \
-  --eval_fixed_rollout_steps 10 \
-  --n_initial_conditions 5 \
-  --start_timestep 1 \
-  --ic_stride 1 \
-  --device cuda \
-  --plot_variables t2m,z500,msl
-```
-
-Dual-resolution evaluation uses the same script and active mode:
-
-```bash
-python scripts/evaluate.py \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 2p5 \
-  --checkpoint experiments/raw_2p5_baseline_2p5/best_ckpt.tar \
-  --output_dir experiments/raw_2p5_baseline_2p5/evaluation \
-  --rollout_steps 10 \
-  --plot_variables t2m,z500,msl
-```
-
-The evaluator resolves the graph, grid shape, normalization statistics, and persistence baseline from the active resolution profile and checkpoint metadata.
-
-This produces one model curve per requested variable, plus the persistence baseline if `plot_persistence: true`:
-
-```text
-evaluation/
-  S10/
-    evaluation_metrics.csv
-    rollout_rmse.csv
-    rollout_acc.csv
-  fixed10_global_best_metrics.json
-  plots/
-    fixed10_global_best_t2m_rmse_acc.png
-    fixed10_global_best_z500_rmse_acc.png
-    fixed10_global_best_msl_rmse_acc.png
-```
-
-Stage comparison is separate. It loads each stage-specific checkpoint and evaluates every checkpoint with the same fixed horizon:
-
-```bash
-python scripts/evaluate.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config raw_5p625 \
-  --experiment_dir experiments/raw_5p625_full150 \
-  --compare_stage_checkpoints \
-  --eval_fixed_rollout_steps 10 \
-  --plot_variables t2m,z500,msl \
-  --device cuda
-```
-
-The plot labels mean training stage, not evaluation horizon:
-
-```text
-trained S=1
-trained S=2
-trained S=4
-trained S=6
-trained S=8
-trained S=10
-global best
-persistence
-```
-
-The stage comparison writes:
-
-```text
-evaluation/
-  fixed10_stage_comparison_metrics.json
-  trained_S1/
-    evaluation_metrics.csv
-    rollout_rmse.csv
-    rollout_acc.csv
-  trained_S10/
-    evaluation_metrics.csv
-    rollout_rmse.csv
-    rollout_acc.csv
-  plots/
-    fixed10_stage_comparison_t2m_rmse_acc.png
-```
-
-Stage comparison is for debugging and ablation. It should not compare S=1 evaluated for one day against S=10 evaluated for ten days. All stage checkpoints are evaluated with the same `--eval_fixed_rollout_steps` value.
-
-`evaluation_metrics.csv` has one row per lead time and variable:
-
-```text
-rollout_steps,lead_time,variable_idx,original_channel_idx,variable_name,rmse,acc
-```
-
-`rollout_rmse.csv` and `rollout_acc.csv` have one column per variable and one row per lead time. To make rollout plots for a specific variable, pass `--plot_variables`. The variable can be given as:
-
-- variable name, such as `t2m` or `z500`
-- local output `variable_idx`, such as `60`
-- original channel index, if it is not ambiguous
-- `all`, to plot every output variable
-
-Normal one-checkpoint evaluation for one variable:
-
-```bash
-python scripts/evaluate.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config raw_5p625 \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
-  --output_dir experiments/raw_5p625_full150/evaluation \
-  --eval_fixed_rollout_steps 10 \
-  --plot_variables t2m
-```
-
-Normal one-checkpoint evaluation for multiple variables:
-
-```bash
-python scripts/evaluate.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config raw_5p625 \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
-  --output_dir experiments/raw_5p625_full150/evaluation \
-  --eval_fixed_rollout_steps 10 \
-  --plot_variables z500,t2m,msl
-```
-
-Plots are written to:
-
-```text
-<output_dir>/plots/
-  fixed10_global_best_z500_rmse_acc.png
-  fixed10_global_best_t2m_rmse_acc.png
-```
-
-Each plot has two panels: RMSE vs lead time and ACC vs lead time. In normal mode the model appears as one curve. In stage-comparison mode each curve is a different checkpoint trained at a different rollout stage, evaluated with the same fixed horizon.
-
-For WeatherBench2-compatible Kai comparisons, use the `weatherbench2` RMSE backend. This computes RMSE as `sqrt(mean(latitude-weighted spatial MSE over initial conditions))`, saves paired per-IC MSE/RMSE arrays, and writes WeatherBench2-prefixed comparison files:
-
-```bash
-EXP=experiments/main_raw_2p5_b4_acc3_bf16_delta_l3_hidden128
-CFG=configs/weather_dual_resolution_l3_hidden128.yaml
-CLIM=data/stats/2p5_train_dayofyear_climatology.nc
-KAI=data/external/kai_2.5.csv
-
-python scripts/evaluate.py \
-  --config "$CFG" \
-  --resolution_mode 2p5 \
-  --checkpoint "$EXP/best_ckpt.tar" \
-  --split test \
-  --fixed_rollout_steps 10 \
-  --selection stride \
-  --stride 7 \
-  --variables z500 t2m t850 msl q700 u850 \
-  --include_persistence \
-  --climatology_path "$CLIM" \
-  --bootstrap_samples 1000 \
-  --confidence_level 0.95 \
-  --bootstrap_seed 42 \
-  --rmse_backend weatherbench2 \
-  --external_baseline_csv "$KAI" \
-  --external_baseline_label "Kai 7M" \
-  --output_dir "$EXP/evaluation_test_weekly_weatherbench2"
-```
-
-To compare the repository's current RMSE output with the WeatherBench2-compatible backend from the same rollout:
-
-```bash
-python scripts/evaluate.py \
-  ... \
-  --rmse_backend both \
-  --output_dir "$EXP/evaluation_test_weekly_rmse_backend_compare"
-```
-
-ACC requires a daily climatology. By default, if `climatology_path` is not set and `compute_climatology: true`, the evaluator computes climatology from `train_data_path` and caches it as:
-
-```text
-<output_dir>/daily_climatology.npz
-```
-
-To reuse an existing climatology file:
-
-```bash
-python scripts/evaluate.py \
-  --yaml_config configs/gnn_5p625.yaml \
-  --config raw_5p625 \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
-  --output_dir experiments/raw_5p625_full150/evaluation \
-  --eval_fixed_rollout_steps 10 \
-  --climatology_path experiments/raw_5p625_full150/evaluation/daily_climatology.npz \
-  --no_compute_climatology
-```
-
-If evaluating a smoke checkpoint trained with the small debug architecture, use a matching smoke/eval config such as `eval_smoke_5p625`; checkpoint architecture settings must match the config.
-
-## Qualitative Rollout Map Visualization
-
-Use `scripts/visualize_rollout_maps.py` to inspect ground truth, prediction, and bias maps for selected variables and lead times. The script uses Cartopy, so coastlines and country borders are drawn on every panel.
-
-```bash
-cd /lustre/home/ziya/GNN/GraphWeather5p625
-
-python scripts/visualize_rollout_maps.py \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
-  --config configs/gnn_5p625.yaml \
-  --config_name raw_5p625 \
-  --split valid \
-  --aggregate_mode sample \
-  --sample_index 0 \
-  --rollout_steps 10 \
-  --lead_times 1 3 5 10 \
-  --variables z500 t2m msl t850 \
-  --output_dir experiments/raw_5p625_full150/visualizations
-```
-
-For a 2.5-degree checkpoint:
-
-```bash
-python scripts/visualize_rollout_maps.py \
-  --checkpoint experiments/raw_2p5_baseline_2p5/best_ckpt.tar \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 2p5 \
-  --split valid \
-  --aggregate_mode sample \
-  --sample_index 0 \
-  --rollout_steps 10 \
-  --lead_times 1 3 5 10 \
-  --variables z500 t2m msl t850 \
-  --output_dir experiments/raw_2p5_baseline_2p5/visualizations
-```
-
-Map titles include the active mode and grid shape, for example `mode: 2p5 | grid: 72x144`.
-
-For a stage-specific checkpoint, point `--checkpoint` at that file:
-
-```bash
-python scripts/visualize_rollout_maps.py \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt_S6.tar \
-  --config configs/gnn_5p625.yaml \
-  --config_name raw_5p625 \
-  --split valid \
-  --aggregate_mode sample \
-  --sample_index 0 \
-  --rollout_steps 10 \
-  --lead_times 1 3 5 10 \
-  --variables msl t2m z500 u500 \
-  --output_dir experiments/raw_5p625_full150/visualizations_S6
-```
-
-Print the variable mapping and exit:
-
-```bash
-python scripts/visualize_rollout_maps.py \
-  --config configs/gnn_5p625.yaml \
-  --config_name raw_5p625 \
-  --split valid \
-  --rollout_steps 10 \
-  --variables z500 t2m t850 msl u500 \
-  --print_variable_mapping
-```
-
-Make whole-year mean maps instead of a single sample:
-
-```bash
-python scripts/visualize_rollout_maps.py \
-  --checkpoint experiments/raw_5p625_full150/best_ckpt.tar \
-  --config configs/gnn_5p625.yaml \
-  --config_name raw_5p625 \
-  --split valid \
-  --aggregate_mode year_mean \
-  --rollout_steps 10 \
-  --lead_times 1 3 5 10 \
-  --variables z500 t2m t850 msl \
-  --output_dir experiments/raw_5p625_full150/visualizations_year_mean
-```
-
-For a quick year-mean smoke test, add `--max_batches 2`. The script uses batch size 1 for this visualization path.
-
-Each variable is saved as one figure with rows for lead times and columns:
-
-```text
-GT | Prediction | Bias = Prediction - Ground Truth
-```
-
-Internally each row uses a fixed five-column GridSpec layout:
-
-```text
-GT map | Prediction map | shared GT/Pred colorbar | Bias map | Bias colorbar
-```
-
-GT and prediction share the same color scale. Bias is always `prediction - ground_truth` and uses a symmetric diverging colorbar centered on zero. Use `--robust_percentile 99` to control robust color limits and `--same_scale_across_leads` to keep one GT/pred scale across all selected leads for each variable.
-
-Example output:
-
-```text
-visualizations/
-  sample000_z500_rollout_maps.png
-  sample000_t2m_rollout_maps.png
-  sample000_msl_rollout_maps.png
-  sample000_t850_rollout_maps.png
-  variable_channel_mapping.json
-  visualization_metadata.json
-  visualize_rollout_maps.log
-```
-
-For `year_mean`, filenames use the `yearmean_` prefix, such as `yearmean_z500_rollout_maps.png`.
-
-Known variable names include `z500`, `t2m`, `msl`, `t850`, and `u500`; aliases such as `2m_temperature`, `temperature_850`, and `mean_sea_level_pressure` are also supported. The resolver uses metadata from config/NetCDF/checkpoint-side JSON first. Hardcoded fallback channel indices are only used if you pass `--allow_hardcoded_variable_fallback`. By default, maps are denormalized back to physical units using the configured global mean/std files. Use `--no_denormalize` to plot normalized values, `--convert_z_to_height` to convert geopotential z variables from `m^2 s^-2` to meters, and `--save_arrays` to save per-lead `gt`, `pred`, and `bias` arrays as `.npy`.
-
-## 2.5 Static Forcing Variant
-
-The `raw_static_forcing` config enables auxiliary inputs for the 2.5 degree experiment:
-
-```text
-sin/cos latitude, sin/cos longitude, sin/cos day-of-year, orography, and known future TISR
-```
-
-The current ERA5-67 NetCDF metadata resolves `tisr` and `orog` directly. If no `lsm` channel or `static_fields.path` is available, land-sea mask is skipped with a warning.
-
-Train the new experiment variant:
-
-```bash
-python scripts/train.py \
-  --config configs/weather_dual_resolution.yaml \
-  --config_name raw_static_forcing \
-  --resolution_mode 2p5 \
-  --experiment_name main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine_static_forcing
-```
-
-Evaluate the trained global-best checkpoint:
-
-```bash
-EXP=experiments/main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine_static_forcing
-CFG=configs/weather_dual_resolution.yaml
-CLIM=data/stats/2p5_train_dayofyear_climatology.nc
-
-python scripts/evaluate.py \
-  --config "$CFG" \
-  --config_name raw_static_forcing \
-  --resolution_mode 2p5 \
-  --checkpoint "$EXP/best_ckpt.tar" \
-  --split test \
-  --fixed_rollout_steps 10 \
-  --selection stride \
-  --stride 7 \
-  --variables z500 t2m t850 msl \
-  --include_persistence \
-  --climatology_path "$CLIM" \
-  --bootstrap_samples 1000 \
-  --confidence_level 0.95 \
-  --bootstrap_seed 42 \
-  --output_dir "$EXP/evaluation_test_weekly52"
-```
-
-## Latitude-Zone RMSE Dominance
-
-Use `scripts/evaluate_zone_rmse_dominance.py` to diagnose which 15-degree latitude band contributes most to global weighted squared error. The bands are `90S-75S`, `75S-60S`, `60S-45S`, `45S-30S`, `30S-15S`, `15S-0`, `0-15N`, `15N-30N`, `30N-45N`, `45N-60N`, `60N-75N`, and `75N-90N`. Dominance percentages are computed from latitude-weighted squared error, not from RMSE.
-
-Smoke command:
-
-```bash
-EXP=experiments/main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine
-CFG=configs/weather_dual_resolution.yaml
-
-python scripts/evaluate_zone_rmse_dominance.py \
-  --config "$CFG" \
-  --resolution_mode 2p5 \
-  --checkpoint "$EXP/best_ckpt.tar" \
-  --split test \
-  --fixed_rollout_steps 10 \
-  --selection first_n \
-  --n_initial_conditions 2 \
-  --variables z500 t2m \
-  --include_persistence \
-  --output_dir /tmp/zone_rmse_smoke
-```
-
-Weekly-start command:
-
-```bash
-EXP=experiments/main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine
-CFG=configs/weather_dual_resolution.yaml
-
-python scripts/evaluate_zone_rmse_dominance.py \
-  --config "$CFG" \
-  --resolution_mode 2p5 \
-  --checkpoint "$EXP/best_ckpt.tar" \
-  --split test \
-  --fixed_rollout_steps 10 \
-  --selection stride \
-  --stride 7 \
-  --variables z500 t2m t850 msl q700 u850 \
-  --include_persistence \
-  --output_dir "$EXP/zone_rmse_dominance_weekly52"
-```
-
-## Extra Feature Diagnostics
-
-Use `scripts/debug_extra_features.py` to verify Priority 2 auxiliary features without training. It checks variable mapping, known future TISR alignment, rollout overrides, orography copy behavior, loss masking, target-time day-of-year features, lat/lon ordering, orography orientation, land-sea mask availability, and NaN/Inf feature statistics.
-
-Feature debug on one sample:
-
-```bash
-python scripts/debug_extra_features.py \
-  --config configs/weather_dual_resolution.yaml \
-  --resolution_mode 2p5 \
-  --split test \
-  --sample_index 0 \
-  --rollout_steps 10 \
-  --output_dir /tmp/debug_extra_features_sample0 \
-  --save_arrays
-```
-
-Feature debug with checkpoint rollout:
-
-```bash
-EXP=experiments/main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine_static_forcing
-CFG=configs/weather_dual_resolution.yaml
-
-python scripts/debug_extra_features.py \
-  --config "$CFG" \
-  --resolution_mode 2p5 \
-  --checkpoint "$EXP/best_ckpt.tar" \
-  --split test \
-  --sample_index 0 \
-  --rollout_steps 10 \
-  --output_dir "$EXP/debug_extra_features_sample0" \
-  --save_arrays
-```
-
-Run synthetic unit tests:
-
-```bash
-pytest tests/test_extra_features.py -q
-```
-
-## Optional 4-Level L3 Graph U-Net
-
-The default model remains the original 3-level Graph U-Net. Enable the 4-level variant explicitly with:
-
-```yaml
-model:
-  num_graph_levels: 4
-  use_l3: true
-  l3_blocks: 1
-  l2_refine_after_l3_blocks: 1
-```
-
-For 2.5-degree runs, the L3 variant uses `72x144 -> 36x72 -> 18x36 -> 9x18`. It adds a coarse global propagation level and then refines L2 after unpooling from L3. With `hidden_dim=96`, parameters increase from about `1.13M` to `1.40M`.
-
-Build the L3 graph cache:
-
-```bash
-python scripts/build_graph.py \
-  --config configs/weather_dual_resolution_l3.yaml \
-  --resolution_mode 2p5 \
-  --num_graph_levels 4 \
-  --force_rebuild
-```
-
-Train the L3 experiment from scratch:
-
-```bash
-python scripts/train.py \
-  --config configs/weather_dual_resolution_l3.yaml \
-  --resolution_mode 2p5 \
-  --experiment_name main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine_l3
-```
-
-Evaluate the L3 checkpoint with the matching config:
-
-```bash
-EXP=experiments/main_raw_2p5_b4_acc3_bf16_delta_warmup_cosine_l3
-CFG=configs/weather_dual_resolution_l3.yaml
-CLIM=data/stats/2p5_train_dayofyear_climatology.nc
-
-python scripts/evaluate.py \
-  --config "$CFG" \
-  --resolution_mode 2p5 \
-  --checkpoint "$EXP/best_ckpt.tar" \
-  --split test \
-  --fixed_rollout_steps 10 \
-  --selection stride \
-  --stride 7 \
-  --variables z500 t2m t850 msl q700 u850 \
-  --include_persistence \
-  --climatology_path "$CLIM" \
-  --bootstrap_samples 1000 \
-  --confidence_level 0.95 \
-  --bootstrap_seed 42 \
-  --output_dir "$EXP/evaluation_test_weekly52"
-```
-
-For the trained hidden-dimension-128 L3 run, the repo includes a wrapper that runs both final RMSE/ACC evaluation and qualitative rollout maps:
-
-```bash
-bash scripts/run_hidden128_qualitative_rmse_acc.sh
-```
-
-By default it evaluates:
-
-```text
-experiments/main_raw_2p5_b4_acc3_bf16_delta_l3_hidden128/best_ckpt.tar
-```
-
-Outputs are written to:
-
-```text
-experiments/main_raw_2p5_b4_acc3_bf16_delta_l3_hidden128/evaluation_test_weekly52/
-experiments/main_raw_2p5_b4_acc3_bf16_delta_l3_hidden128/visualizations_test_sample000/
-```
-
-Useful overrides:
-
-```bash
-# Quick smoke run without the expensive 52-start evaluation.
-RUN_EVAL=0 USE_CARTOPY=0 bash scripts/run_hidden128_qualitative_rmse_acc.sh
-
-# Year-mean qualitative maps over a small sample count.
-RUN_EVAL=0 AGGREGATE_MODE=year_mean MAX_BATCHES=2 bash scripts/run_hidden128_qualitative_rmse_acc.sh
-
-# RMSE/ACC only, using fewer initial conditions.
-RUN_QUALITATIVE=0 N_INITIAL_CONDITIONS=5 BOOTSTRAP_SAMPLES=0 bash scripts/run_hidden128_qualitative_rmse_acc.sh
-```
-
-Old configs remain 3-level by default. Checkpoints record `use_l3` and `num_graph_levels`; 3-level checkpoints load only into 3-level models unless `--init_from_checkpoint_allow_partial` is explicitly used for weight initialization.
-
-## Rollout-Stage Warmup Cosine LR
-
-Use `lr_schedule_type: rollout_stage_warmup_cosine` to restart warmup+cosine inside each rollout curriculum stage. This is separate from the old global `warmup_cosine` and old rollout-stage LR behavior.
-
-Train the L3 stage-wise scheduler experiment:
-
-```bash
-python scripts/train.py \
-  --config configs/weather_dual_resolution_l3_stage_warmup_cosine.yaml \
-  --resolution_mode 2p5 \
-  --experiment_name main_raw_2p5_b4_acc3_bf16_delta_l3_stage_warmup_cosine
-```
-
-Small startup smoke check:
-
-```bash
-python scripts/train.py \
-  --config configs/weather_dual_resolution_l3_stage_warmup_cosine.yaml \
-  --resolution_mode 2p5 \
-  --experiment_name smoke_l3_stage_warmup_cosine \
-  --max_epochs 2 \
-  --max_train_batches 2 \
-  --max_valid_batches 2
-```
-
-The scheduler writes per-optimizer-update LR history to:
-
-```text
-lr_schedule.csv
-lr_schedule.png
-```
-
-## Outputs
-
-Training writes to:
-
-```text
-experiments/<config>_<run_num>/
-  out.log
-  ckpt.tar
-  best_ckpt.tar
-  best_ckpt_S1.tar
-  best_ckpt_S2.tar
-  best_ckpt_S4.tar
-  best_ckpt_S6.tar
-  best_ckpt_S8.tar
-  best_ckpt_S10.tar
-  last_ckpt.tar
-  lr_schedule.csv
-  lr_schedule.png
-```
-
-The zip archive excludes `*.tar` checkpoint files but keeps `out.log` files.
+CI runs the fast lane on every push (`.github/workflows/ci.yml`).

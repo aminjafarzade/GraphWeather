@@ -1,0 +1,48 @@
+name: fast-lane
+
+# Cheap, no-GPU regression net: the 6 dashboard-contract tests + the config /
+# resolution invariants + zone-RMSE dominance (see CONTRIBUTING.md §9).
+#
+# These test *files* import no torch, but their targets do (src/resolution.py and
+# scripts/evaluate_zone_rmse_dominance.py import torch at module load), so we
+# install a CPU-only torch. We deliberately do NOT install the full package:
+# cartopy / netCDF4 are only needed for plotting and NetCDF data loading, which
+# the fast lane never touches (verified). For a full local/GPU install use
+# `pip install -e '.[dev]'`.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install fast-lane deps (CPU torch, no cartopy/netCDF4)
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch keeps the lane GPU-free and lean.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pandas PyYAML matplotlib fastapi uvicorn httpx pytest
+
+      - name: Seed config-resolved golden
+        # First run generates the machine-specific golden (git-ignored) and skips;
+        # the fast-lane step below then compares against it within the same run.
+        run: pytest tests/test_config_resolved_snapshot.py -q
+
+      - name: Fast lane (dashboard contract + config/resolution invariants)
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q \
+            tests/test_dashboard_*.py \
+            tests/test_config_*.py \
+            tests/test_resolution*.py \
+            tests/test_zone_rmse_dominance.py

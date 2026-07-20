@@ -77,6 +77,10 @@ BOOTSTRAP_SAMPLES="${BOOTSTRAP_SAMPLES:-1000}"
 CONFIDENCE_LEVEL="${CONFIDENCE_LEVEL:-0.95}"
 BOOTSTRAP_SEED="${BOOTSTRAP_SEED:-42}"
 
+# training seed recorded in run.json (matches scripts/train.py's default 777;
+# this launcher does not override it unless you pass --seed via EXTRA_TRAIN_ARGS)
+SEED="${SEED:-777}"
+
 # optional per-stage passthrough args (space separated)
 EXTRA_TRAIN_ARGS="${EXTRA_TRAIN_ARGS:-}"
 EXTRA_EVAL_ARGS="${EXTRA_EVAL_ARGS:-}"
@@ -115,6 +119,7 @@ DIAG_DIR="${EXP_DIR}/diagnostics_full_eval"
 LOG_DIR="${EXP_DIR}/logs"
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
+STARTED_AT="$(date -Is)"
 mkdir -p "${LOG_DIR}"
 MASTER_LOG="${LOG_DIR}/pipeline_${RUN_TS}.log"
 
@@ -423,12 +428,47 @@ stage_diagnostics() {
   record_summary "diagnostics" "OK (exit ${STAGE_STATUS})" "${STAGE_ELAPSED}s"
 }
 
+# =============================================================================
+# RUN MANIFEST — run.json (machine-readable definition-of-done, purely additive)
+#
+# Written at the end of a successful pipeline into the run dir. The dashboard
+# keys runs on config_resolved.yaml, NOT this file (run.json is optional and
+# ignored by the scanner); it exists so completion is explicit instead of
+# grepping out.log for "DONE rank 0". See CONTRIBUTING.md §8.
+# =============================================================================
+write_run_manifest() {
+  [[ "${DRY_RUN}" != "0" ]] && return 0
+  # only for a real run dir (skip plot-only invocations that never made EXP_DIR)
+  [[ -d "${EXP_DIR}" ]] || return 0
+  local manifest git_sha finished_at
+  manifest="${EXP_DIR}/run.json"
+  git_sha="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  finished_at="$(date -Is)"
+  cat > "${manifest}" <<JSON
+{
+  "schema": "gw-run-manifest/1",
+  "status": "complete",
+  "resolution": "${RESOLUTION_MODE}",
+  "config_name": "${CONFIG_NAME}",
+  "config": "${CONFIG}",
+  "seed": ${SEED},
+  "horizon": ${ROLLOUT_STEPS},
+  "git_sha": "${git_sha}",
+  "started_at": "${STARTED_AT}",
+  "finished_at": "${finished_at}"
+}
+JSON
+  log_master "Wrote run manifest: ${manifest}"
+}
+
 # --- driver ------------------------------------------------------------------
 if [[ "${RUN_TRAIN}" != "0" ]]; then stage_train; else record_summary "train" "SKIPPED (RUN_TRAIN=0)" "-"; fi
 if [[ "${RUN_EVAL}" != "0" ]]; then stage_eval; else record_summary "eval" "SKIPPED (RUN_EVAL=0)" "-"; fi
 if [[ "${RUN_PLOT}" != "0" ]]; then stage_plot; else record_summary "plot" "SKIPPED (RUN_PLOT=0)" "-"; fi
 if [[ "${RUN_QUALITATIVE}" != "0" ]]; then stage_qualitative; else record_summary "qualitative" "SKIPPED (RUN_QUALITATIVE=0)" "-"; fi
 if [[ "${RUN_DIAGNOSTICS}" != "0" ]]; then stage_diagnostics; else record_summary "diagnostics" "SKIPPED (RUN_DIAGNOSTICS=0)" "-"; fi
+
+write_run_manifest
 
 log_master ""
 log_master "All requested stages completed."
