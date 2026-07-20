@@ -1,0 +1,299 @@
+default: &DEFAULT
+  # KAI-style training interface.
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  scheduler: "CosineAnnealingLR"
+  max_epochs: 50
+  max_train_batches: null
+  max_valid_batches: null
+  batch_size: 12
+  num_data_workers: 4
+  enable_amp: true
+  max_gradient_norm: 1.0
+
+  # KAI_5 files are daily. One dt step is one dataset time index.
+  # The model still predicts a tendency and adds it to the current state.
+  dt: 1
+  n_history: 1
+  max_rollout_steps: 10
+  rollout_schedule: [1, 2, 4, 6, 8, 10]
+  rollout_stage_epochs: [5, 5, 10, 10, 10, 10]
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1, 2, 4, 6, 8, 10]
+  trainable_scope: "all"
+  checkpoint_metric: "valid_S10"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "stage_horizon"
+
+  nettype: "graph_weather"
+  target: "default"
+  resolution: 5.625
+  graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625_k8_hybrid_row_aware_v2.pt"
+  auto_build_graph: true
+  hidden_dim: 96
+  edge_dim: 6
+  num_heads: 4
+  k_neighbors: 8
+  graph_connectivity_strategy: "hybrid_row_aware_knn"
+  row_aware_knn:
+    enabled: true
+    interior_neighbors_from_north_row: 1
+    interior_neighbors_from_south_row: 1
+    polar_neighbors_from_adjacent_row: 2
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 2
+  l1_blocks: 2
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+
+  graph_gradient_weight: 0.0
+
+  lr_schedule_type: "rollout_stage"
+  lr_by_rollout:
+    1: 1.0e-4
+    2: 1.0e-4
+    4: 7.0e-5
+    6: 6.0e-5
+    8: 5.0e-5
+    10: 3.0e-5
+  warmup_epochs: 1
+
+  in_channels:  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+                 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+                 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+                 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+  out_channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+                 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+                 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+                 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
+
+  normalization: "zscore"
+  add_grid: false
+  N_grid_channels: 0
+  gridtype: "sinusoidal"
+  add_noise: false
+  noise_std: 0.0
+  crop_size_x: null
+  crop_size_y: null
+  roll: false
+  orography: false
+  orography_path: null
+
+  target_handling:
+    enabled: true
+    copy_variables: ["orog"]
+    exclude_loss_variables: ["orog"]
+    known_future_variables: []
+
+  train_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/train"
+  valid_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/valid"
+  test_dataset_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/test"
+  global_means_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy"
+  global_stds_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy"
+  exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
+
+  # Standalone evaluation. Override eval_checkpoint_path from the CLI unless
+  # you want to hard-code a specific checkpoint here.
+  eval_checkpoint_path: null
+  eval_output_dir: null
+  eval_forecast_steps: [10]
+  eval_fixed_rollout_steps: 10
+  eval_compare_stage_checkpoints: false
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+    4: "best_ckpt_S4.tar"
+    6: "best_ckpt_S6.tar"
+    8: "best_ckpt_S8.tar"
+    10: "best_ckpt_S10.tar"
+  eval_global_best_checkpoint: "best_ckpt.tar"
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  n_initial_conditions: 5
+  climatology_path: null
+  compute_climatology: true
+  climatology_chunk_size: 128
+  eval_device: "cuda"
+  eval_plot_variables: []
+  eval_plot_format: "png"
+  plot_persistence: true
+
+  save_checkpoint: true
+  resume: true
+
+raw_5p625:
+  <<: *DEFAULT
+  max_epochs: 150
+  max_train_batches: null
+  max_valid_batches: null
+  batch_size: 12
+  hidden_dim: 96
+  num_heads: 4
+  max_rollout_steps: 10
+  rollout_schedule: [1, 2, 4, 6, 8, 10]
+  rollout_stage_epochs: [5, 5, 10, 10, 10, 10]
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1, 2, 4, 6, 8, 10]
+  save_checkpoint: true
+  resume: true
+
+smoke_5p625:
+  <<: *DEFAULT
+  max_epochs: 2
+  max_train_batches: 4
+  max_valid_batches: 2
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  rollout_schedule: [1]
+  rollout_stage_epochs: []
+  max_rollout_steps: 1
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1]
+  trainable_scope: "all"
+  save_checkpoint: false
+  resume: false
+
+smoke_finetune_head_5p625:
+  <<: *DEFAULT
+  max_epochs: 2
+  max_train_batches: 4
+  max_valid_batches: 2
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  rollout_schedule: [1]
+  rollout_stage_epochs: []
+  max_rollout_steps: 1
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1]
+  trainable_scope: "decoder_head"
+  save_checkpoint: false
+  resume: false
+
+smoke_rollout_lr_5p625:
+  <<: *DEFAULT
+  max_epochs: 2
+  max_train_batches: 2
+  max_valid_batches: 2
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  max_rollout_steps: 2
+  rollout_schedule: [1, 2]
+  rollout_stage_epochs: [1, 1]
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1, 2]
+  checkpoint_metric: "valid_S2"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "stage_horizon"
+  lr_schedule_type: "rollout_stage"
+  lr_by_rollout:
+    1: 1.0e-4
+    2: 7.0e-5
+  warmup_epochs: 0
+  trainable_scope: "all"
+  save_checkpoint: false
+  resume: false
+
+eval_smoke_5p625:
+  <<: *DEFAULT
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  max_rollout_steps: 2
+  rollout_schedule: [1, 2]
+  rollout_stage_epochs: [1, 1]
+  eval_rollout_steps: [1, 2]
+  eval_forecast_steps: [2]
+  eval_fixed_rollout_steps: 2
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+  eval_global_best_checkpoint: "best_ckpt.tar"
+  n_initial_conditions: 1
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  eval_device: "cpu"
+  eval_plot_variables: ["t2m"]
+  plot_persistence: true
+  save_checkpoint: false
+  resume: false
+
+smoke_stage_ckpt_5p625:
+  <<: *DEFAULT
+  max_epochs: 3
+  max_train_batches: 2
+  max_valid_batches: 2
+  batch_size: 2
+  num_data_workers: 0
+  hidden_dim: 32
+  num_heads: 4
+  encoder_blocks: 1
+  decoder_blocks: 1
+  l0_blocks: 1
+  l1_blocks: 1
+  l2_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  max_rollout_steps: 2
+  rollout_schedule: [1, 2]
+  rollout_stage_epochs: [1, 2]
+  valid_rollout_steps: 1
+  validate_with_train_rollout: true
+  eval_rollout_steps: [1, 2]
+  checkpoint_metric: "valid_S2"
+  checkpoint_mode: "min"
+  stage_checkpoint_metric_mode: "stage_horizon"
+  eval_fixed_rollout_steps: 2
+  eval_stage_checkpoints:
+    1: "best_ckpt_S1.tar"
+    2: "best_ckpt_S2.tar"
+  eval_forecast_steps: [2]
+  n_initial_conditions: 1
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  eval_device: "cpu"
+  eval_plot_variables: ["t2m"]
+  plot_persistence: true
+  save_checkpoint: true
+  resume: false

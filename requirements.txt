@@ -1,0 +1,9 @@
+torch>=2.1
+numpy>=1.23
+pandas>=2.0
+scipy>=1.10
+PyYAML>=6.0
+netCDF4>=1.6
+tqdm>=4.66
+matplotlib>=3.7
+cartopy>=0.22

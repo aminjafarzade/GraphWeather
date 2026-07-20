@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gw-dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+(function () { try {
+  var t = localStorage.getItem("gw-dash-theme") ||
+          (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = t;
+} catch (e) {} })();
+</script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<link rel="stylesheet" href="styles.css?v=20260715g">
+</head>
+<body>
+
+<header>
+  <div class="brand"><h1>gw-dashboard</h1><span>read-only · schema <span id="schemaVersion">…</span></span></div>
+  <nav class="tabs" id="tabs">
+    <button data-view="runs" class="active">Runs</button>
+    <button data-view="compare">Compare</button>
+    <button data-view="summary">Summary</button>
+    <button data-view="ideas">Ideas</button>
+    <button data-view="problems">Problems<span id="problemBadge"></span></button>
+  </nav>
+  <div class="spacer"></div>
+  <span id="statusPill" title="scanner heartbeat">…</span>
+  <button id="themeToggle">◐ Theme</button>
+</header>
+
+<main>
+  <section class="view active" id="view-runs">
+    <div class="card">
+      <h3>All runs</h3>
+      <div class="tablewrap"><table id="runsTable"></table></div>
+      <p class="hint mt">Click a run for its detail view. Status and every value
+        come from the backend; the horizon is per-run data.</p>
+    </div>
+  </section>
+
+  <section class="view" id="view-detail">
+    <span class="backlink" id="backToRuns">← all runs</span>
+    <div id="detailBody"></div>
+  </section>
+
+  <section class="view" id="view-compare">
+    <div class="controls" id="cmpChips"></div>
+    <div class="controls">
+      <span><label>Evaluation</label><select id="cmpEval"></select></span>
+      <span><label>Variable</label><select id="cmpVar"></select></span>
+      <span><label>Metric</label><select id="cmpMetric">
+        <option value="rmse">RMSE</option><option value="acc">ACC</option></select></span>
+      <span><label>Criterion</label><select id="cmpLead"></select></span>
+      <span><label><input type="checkbox" id="cmpPersistence" checked> persistence</label></span>
+      <span id="cmpExternals"></span>
+    </div>
+    <div id="cmpWarnings"></div>
+    <div class="grid2">
+      <div class="card"><h3>RMSE vs lead time</h3><div class="chart chart-lg" id="cmpRmse"></div></div>
+      <div class="card"><h3>ACC vs lead time</h3><div class="chart chart-lg" id="cmpAcc"></div></div>
+    </div>
+    <div class="card mt">
+      <h3>Ranking <span style="text-transform:none;font-weight:400" id="rankCriterion"></span></h3>
+      <div class="tablewrap"><table id="rankTable"></table></div>
+    </div>
+    <div class="card mt">
+      <h3>Best per variable</h3>
+      <div class="tablewrap"><table id="bestTable"></table></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-summary">
+    <div class="card tree-legend">
+      <span><span class="sw"></span>completed</span>
+      <span><span class="sw prog"></span>in progress</span>
+      <span><span class="sw sug"></span>suggested / proposed</span>
+      <span><span class="sw win"></span>winning path</span>
+      <span class="spacer"></span>
+      <span class="hint">click a node → summary · panel: edit · add children · 🌱 new independent trees · delete · notes</span>
+    </div>
+    <div class="tree-layout mt">
+      <div class="card" id="treeWrap"><svg id="treeSvg"></svg></div>
+      <div class="card" id="nodePanel"><p class="hint">Select a node in the tree.</p></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-ideas">
+    <div id="ideasBody"></div>
+  </section>
+
+  <section class="view" id="view-problems">
+    <div class="card"><h3>Validation problems (verbatim)</h3><div id="problemsList"></div></div>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+
+<script type="module" src="main.js?v=20260715g"></script>
+</body>
+</html>

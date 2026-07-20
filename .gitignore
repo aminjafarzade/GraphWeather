@@ -1,0 +1,62 @@
+# =============================================================================
+# GraphWeather5p625 — commit code + configs only. Exclude large/generated/
+# machine-specific artifacts (checkpoints, analysis, data, run logs).
+# =============================================================================
+
+# --- Trained models, checkpoints, and all per-experiment analysis outputs ----
+# (11 GB; produced by training / evaluation / diagnostics — regenerate locally)
+experiments/
+
+# --- Fresh output roots for NEW runs (keep the empty dirs, exclude contents) --
+# New experiments land in runs/, comparison figures in comparisons/.
+runs/*
+!runs/.gitkeep
+comparisons/*
+!comparisons/.gitkeep
+
+# --- Experiment tracking / run logs ------------------------------------------
+wandb/
+runtime_diagnosis/
+# default local output dir for run_diagnostics.py (top-level only; keep src/diagnostics/)
+/diagnostics/
+logs/
+# captured stdout/stderr logs (e.g. dashboard/server.out, *.out run logs)
+*.out
+
+# --- Data & normalization stats (large; provide/regenerate locally) ----------
+# ERA5 data lives outside the repo; delta stats + climatology are rebuilt via
+# scripts/build_climatology.py and the delta-stats path in the config.
+data/
+
+# --- Graphs (auto-built at runtime via auto_build_graph: true) ----------------
+graphs/
+
+# --- Release/experiment bundles (hundreds of MB each; never commit) ----------
+*.zip
+*.tar
+*.tar.gz
+
+# --- Generated test baseline (machine-specific paths; regenerates on 1st run) -
+tests/config_resolved_goldens/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# --- Environments ------------------------------------------------------------
+.venv/
+venv/
+env/
+
+# --- OS / editor -------------------------------------------------------------
+.DS_Store
+*.swp
+*~
+dashboard/data/
