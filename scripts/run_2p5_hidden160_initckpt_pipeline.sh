@@ -29,6 +29,6 @@ exec bash "${SCRIPT_DIR}/run_pipeline.sh" \
   --curr-config configs/experiments/config_2p5_l3_hidden160_dense_l3k24_curriculum_S2toS10_3ep_initckpt.yaml \
   --curr-name   dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt \
   --primary-label hidden160 \
-  --compare "runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr5e7 runs/dense_l3k24_orogtisr_lossw_scratch_S1x100_S2toS10x3" \
+  --compare "runs/2p5_l3_h128_densel3k24_currS2toS10x3_initckpt runs/2p5_l3_h128_densel3k24_currS2toS10x3_flatlr5e7 runs/2p5_l3_h128_densel3k24_scratch_orogtisr_lossw" \
   --compare-labels "initckpt, flat_lr5e7, orogtisr_scratch" \
   --stages "${STAGES}"

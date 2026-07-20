@@ -64,7 +64,9 @@ def discover_run_dirs(runs_root: Path) -> list[Path]:
         return []
     return sorted(
         p for p in runs_root.iterdir()
-        if p.is_dir() and (p / "config_resolved.yaml").is_file()
+        # skip symlinks: back-compat old->new run-name symlinks (P4.3) point at a
+        # real run dir; ingesting both would double-count the same run.
+        if p.is_dir() and not p.is_symlink() and (p / "config_resolved.yaml").is_file()
     )
 
 

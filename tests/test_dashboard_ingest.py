@@ -27,7 +27,7 @@ from dashboard import ingest  # noqa: E402
 from dashboard.contract import SCHEMA_VERSION  # noqa: E402
 
 RUNS_ROOT = PROJECT_ROOT / "runs"
-CANARY_RUN = "dense_l3k24_curriculum_S2toS10_3ep_initckpt"
+CANARY_RUN = "2p5_l3_h128_densel3k24_currS2toS10x3_initckpt"  # renamed to the §1.2 grammar (P4.3)
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,6 @@ exec bash "${SCRIPT_DIR}/run_pipeline.sh" \
   --curr-config configs/experiments/config_2p5_l3_hidden160_dense_l3k24_curriculum_S2toS10_3ep_initckpt_s1_200ep.yaml \
   --curr-name   dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt_s1_200ep \
   --primary-label hidden160_s1_200ep \
-  --compare "runs/dense_l3k24_hidden160_curriculum_S2toS10_3ep_initckpt runs/dense_l3k24_curriculum_S2toS10_3ep_initckpt runs/dense_l3k24_curriculum_S2toS10_3ep_flat_lr5e7" \
+  --compare "runs/2p5_l3_h160_densel3k24_currS2toS10x3_initckpt runs/2p5_l3_h128_densel3k24_currS2toS10x3_initckpt runs/2p5_l3_h128_densel3k24_currS2toS10x3_flatlr5e7" \
   --compare-labels "hidden160_s1_100ep, initckpt_h128, flat_lr5e7" \
   --stages "${STAGES}"
