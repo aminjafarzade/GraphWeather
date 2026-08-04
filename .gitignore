@@ -85,3 +85,10 @@ dashboard/data/
 # --- Claude Code per-machine settings ---------------------------------------
 # .claude/skills/ IS tracked (shared project tooling); this file is local-only.
 .claude/settings.local.json
+
+# --- Untracked by request: local-only reference material ---------------------
+# Both stay in the working tree; they are simply not published. NOTE: this
+# reverses the P5 decision that archive/scripts/ + archive/configs/ (small
+# retired code) stay tracked. dashboard/docs/ is unaffected (own path).
+/archive/
+/docs/

@@ -16,14 +16,22 @@ warm-started from an S1 checkpoint). The original 3-level, hidden-96, ~1.13M-par
 
 ## Documentation
 
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the repo conventions: naming, layout,
+config layering, and the run/dashboard invariants.
+
+The reference guides below live in the working tree but are **not published in
+this repository**, so the paths are given as plain text rather than links:
+
 | Guide | Covers |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Graph U-Net, graph levels, L3/L4 variants, delta prediction |
-| [docs/data.md](docs/data.md) | Resolutions, NetCDF layout, stats, KAI baselines, the 1p5 pole-less trap |
-| [docs/pipeline.md](docs/pipeline.md) | Environment, the `run_pipeline.sh` golden path, training & curriculum |
-| [docs/evaluation.md](docs/evaluation.md) | RMSE/ACC eval, WeatherBench2 backend, stage comparison, zone dominance |
-| [docs/dashboard.md](docs/dashboard.md) | The results dashboard + its `gw-run/1` data contract |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Repo conventions: naming, layout, config layering, run/dashboard invariants |
+| `docs/architecture.md` | Graph U-Net, graph levels, L3/L4 variants, delta prediction, the mesh encoder |
+| `docs/data.md` | Resolutions, NetCDF layout, stats, KAI baselines, the 1p5 pole-less trap |
+| `docs/pipeline.md` | Environment, the `run_pipeline.sh` golden path, training & curriculum |
+| `docs/evaluation.md` | RMSE/ACC eval, WeatherBench2 backend, stage comparison, zone dominance |
+| `docs/dashboard.md` | The results dashboard + its `gw-run/1` data contract |
+
+The dashboard's own data contract *is* published, under
+[dashboard/docs/](dashboard/docs/).
 
 ## Quickstart
 
@@ -35,7 +43,7 @@ pip install -e '.[dev]'
 For GPU training, install the torch build matching your CUDA driver first. On the
 sm_120 box use the pinned `graphweather-cu128` interpreter — do not assume bare
 `python` (it silently misbehaves under the wrong env). See
-[docs/pipeline.md](docs/pipeline.md).
+`docs/pipeline.md`.
 
 Run a full experiment (graph → train → clim → eval → plot → maps → diagnostics)
 via the single launcher:
@@ -52,7 +60,7 @@ bash scripts/run_pipeline.sh \
 it resets every stage toggle first, so a stale `RUN_*` in the environment cannot
 leak in and retrain over a finished run. `--dry-run` prints the commands without
 executing them. The result lands in `runs/<id>/` (see
-[docs/pipeline.md](docs/pipeline.md)).
+`docs/pipeline.md`).
 
 `scripts/run_full_pipeline.sh` still exists as a thin shim over this launcher;
 new work should call `run_pipeline.sh` directly.
@@ -61,7 +69,7 @@ new work should call `run_pipeline.sh` directly.
 
 Best runs at each resolution, read from the eval outputs under
 `runs/<id>/evaluation_test_weekly52/`. RMSE is latitude-weighted; variables are in
-model units (see [docs/evaluation.md](docs/evaluation.md)). Lower RMSE and higher
+model units (see `docs/evaluation.md`). Lower RMSE and higher
 ACC are better.
 
 ### 2.5° — best run
@@ -120,7 +128,7 @@ their cost here.
 
 An optional GraphCast-style **mesh encoder** (grid → icosphere → grid) is implemented
 but not yet reflected in the numbers above; see
-[docs/architecture.md](docs/architecture.md) and `mesh_encoder` in the config schema.
+`docs/architecture.md` and `mesh_encoder` in the config schema.
 Grid and mesh checkpoints are separate families and the loader refuses to mix them.
 
 ## Results dashboard
@@ -136,7 +144,7 @@ python -m dashboard.ingest --once --json     # inspect ingested run records
 
 Its data contract (`gw-run/1`) is documented in
 [dashboard/docs/](dashboard/docs/) and summarized in
-[docs/dashboard.md](docs/dashboard.md). A directory is a "run" iff it contains
+`docs/dashboard.md`. A directory is a "run" iff it contains
 `config_resolved.yaml`; that invariant must be preserved by any run-storage change.
 
 ## Repository layout
@@ -148,7 +156,8 @@ scripts/dev/  debug/diagnostic/profiling helpers (not part of the pipeline)
 configs/      YAML configs (base + experiments)
 tests/        regression net (fast no-GPU lane + torch-heavy lane; see CONTRIBUTING §9)
 dashboard/    results dashboard (FastAPI + SPA) + dashboard/docs (data contract)
-docs/         reference guides (this table) + docs/experiments (specs)
+docs/         reference guides + docs/experiments (specs) -- local only, not tracked
+archive/      retired configs/scripts + generated decks -- local only, not tracked
 runs/         experiment outputs (git-ignored except .gitkeep)
 data/         stats/ (regenerable, ignored) + baselines/ (tracked KAI CSVs)
 graphs/       auto-built graph bundles (ignored)
