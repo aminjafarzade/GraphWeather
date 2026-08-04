@@ -1,7 +1,7 @@
 # gw-dashboard — build instructions for Claude
 
 You are building **gw-dashboard**: a **read-only** results dashboard over the
-GraphWeather repo at `/home/amin/GNN/GraphWeather5p625`. It is a new
+GraphWeather repo at `/lustre/home/ziya/GNN/GraphWeather5p625`. It is a new
 top-level package `dashboard/` (FastAPI backend + a no-build static frontend).
 It reads experiment artifacts under `runs/` and presents evaluation results,
 comparisons, diagnostics, qualitative maps, and architecture info.

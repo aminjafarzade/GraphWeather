@@ -5,7 +5,7 @@ starting point, but re-verify against the live repo before you depend on any
 single fact** — the repo is active and files change. If the repo contradicts
 this document, the repo wins: stop and report the contradiction.
 
-Repo root: `/home/amin/GNN/GraphWeather5p625`
+Repo root: `/lustre/home/ziya/GNN/GraphWeather5p625`
 Working env: `graphweather-cu128` (torch 2.11+cu128). The dashboard imports
 nothing from `src/` and never needs torch.
 
@@ -143,7 +143,7 @@ priority-list match present.
   (full per-lead arrays). Not present in the `S{N}` CSVs.
 - **Climatology** — used only to define ACC anomalies; **no stored
   climatology-forecast RMSE/ACC curve exists.** Do not fabricate one.
-- **External reference** — `data/baselines/kai_2p5.csv`, columns
+- **External reference** — `experiments/kai_2.5.csv`, columns
   `variable,timestep,rmse,acc` (6 vars × ~10 leads, **2.5° only**). Expose as
   external baseline id `kai-2p5` with resolution tag `2p5`; attach a
   `resolution_mismatch` warning when overlaid on a run of another resolution.

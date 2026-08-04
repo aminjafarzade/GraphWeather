@@ -1,9 +1,12 @@
 # Architecture
 
-A direct-grid spherical **Graph U-Net**. The model operates on the native
-latitude/longitude grid (no regridding to a mesh), predicts a tendency `delta`,
-and returns `x_current + delta`. Autoregressive rollout is trained with a
-curriculum that grows the rollout length.
+A spherical **Graph U-Net**. By default the model operates directly on the
+native latitude/longitude grid, predicts a tendency `delta`, and returns
+`x_current + delta`. An optional `mesh_encoder.enabled: true` path encodes the
+grid onto an icosphere, runs the same Graph U-Net processor on that mesh, and
+decodes back to the grid before the unchanged tendency head and residual.
+Autoregressive rollout is trained with a curriculum that grows the rollout
+length.
 
 Library code lives in `src/` (import as the `src` package). Key modules:
 
@@ -13,6 +16,7 @@ Library code lives in `src/` (import as the `src` package). Key modules:
 | `processor.py` / `layers.py` | message-passing processor + local graph-attention blocks |
 | `pooling.py` | mean/max pool + parent unpool between levels |
 | `graph_builder.py` / `graph_bundle.py` | hybrid row-aware kNN graph construction + container |
+| `mesh_builder.py` / `mesh_layers.py` | optional native icosphere bundle + bipartite grid/mesh message passing |
 | `models.py` | model definitions |
 | `features.py` / `solar.py` / `lead_conditioning.py` | input feature assembly (solar, orography, TISR, lead-time) |
 | `trainer.py` | training loop, curriculum/rollout, BPTT, checkpointing |
@@ -50,6 +54,113 @@ propagation levels and refine finer levels after unpooling:
 Checkpoints record `use_l3` and `num_graph_levels`; a 3-level checkpoint loads
 into a 3-level model only, unless `--init_from_checkpoint_allow_partial` is used
 explicitly for weight initialization.
+
+## Optional icosphere encode/decode
+
+The mesh path is opt-in. Configurations without this block retain the legacy
+direct-grid path:
+
+```yaml
+mesh_encoder:
+  enabled: true
+  refinement: 5
+  g2m_radius_factor: 0.6
+  mlp_hidden_ratio: 2
+graph_path: graphs/graph_2p5_icosphere_r5_l3.pt
+```
+
+`L0` is the finest native icosphere triangulation and successively coarser
+levels come from the same midpoint-subdivision hierarchy. By default, native
+degree-5/6 connectivity is retained. Each native level is stored as six incoming
+slots per node; the 12 original icosahedron vertices have one masked dummy self
+slot. The mask makes that slot contribute exactly zero while keeping the
+existing dense fixed-k attention implementation.
+
+For the two 2.5° L3 experiments:
+
+| Finest mesh | U-Net mesh levels |
+|---|---|
+| M5 | 10242 → 2562 → 642 → 162 |
+| M4 | 2562 → 642 → 162 → 42 |
+
+Grid→mesh edges use the configured radius factor times the maximum native edge
+length of the finest mesh. Mesh→grid edges are the three vertices of the native
+finest-mesh triangle containing each grid point. The existing processor and
+pool/unpool modules contain no mesh-specific branches.
+
+The embedded grid already bypasses the complete mesh processor: Mesh2Grid uses
+it as the destination latent and applies a residual update
+`h_grid + update(h_grid, aggregated_mesh_messages)`. Therefore a second
+post-decoder addition of the same embedding would duplicate the identity path.
+The opt-in `grid_skip_mlp: true` instead follows the GraphCast encoder more
+closely by carrying
+`h_grid_skip = h_grid + MLP+LayerNorm(h_grid)` to Mesh2Grid. Grid2Mesh messages
+still use `h_grid`, so the skip update and mesh update are parallel outputs of
+the encoder step. This option requires `boundary_type: graphcast_mlp`:
+
+```yaml
+mesh_encoder:
+  boundary_type: graphcast_mlp
+  grid_skip_mlp: true
+```
+
+For a dense-L0-style spatial boundary, mesh mode also supports an opt-in grid
+attention encoder and decoder:
+
+```yaml
+mesh_encoder:
+  boundary_type: graphcast_mlp
+  grid_attention_encoder_blocks: 2
+  grid_attention_decoder_blocks: 2
+  grid_attention_k_neighbors: 8
+```
+
+The grid encoder runs after grid embedding and before Grid2Mesh. Its output is
+both the Grid2Mesh source and the long grid latent carried to Mesh2Grid. The
+grid decoder runs after the residual Mesh2Grid update and before the output
+head. These are true spatial `LocalGraphAttentionBlock`s; unlike
+`grid_skip_mlp`, they exchange information over grid-grid edges.
+
+The dense-H160 comparison config embeds the exact L0 tensors from
+`graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt` in the mesh bundle. This avoids
+changing tie-broken polar neighbors when independently rebuilding kNN from
+near-identical floating-point coordinates. Its effective hierarchy is
+grid→M4→M3→M2 (`10368→2562→642→162`), so M1 is omitted to match the dense
+model's four scales:
+
+```text
+grid embedding -> grid attention x2 -> Grid2Mesh
+-> M4/M3/M2 U-Net -> Mesh2Grid -> grid attention x2 -> head
+```
+
+`mesh_encoder.coarse_level_connectivity` defaults to `native_icosphere`: no
+extra long-range edges are added, and global mixing relies on U-Net depth. The
+opt-in `full_m1` value is accepted only when the coarsest level is M1. It makes
+that 42-node level a complete directed graph without self-edges (`k=41`,
+1,722 edge slots), while every finer level remains native. Graph bundles record
+the choice and use separate cache/checkpoint families for the two topologies.
+
+Grid and mesh checkpoints are separate families. Mesh checkpoints record
+`graph_mode: mesh` and the resolved `mesh_encoder` settings. Strict resume,
+initialization, evaluation, and visualization reject a checkpoint from the
+other family. Existing grid checkpoints continue to load in grid mode.
+
+The combined 150-epoch S1 plus three-epochs-per-later-horizon configs are:
+
+- `configs/experiments/2p5_l3_h160_icomeshm5_s1x150_currs2tos10x3.yaml`
+- `configs/experiments/2p5_l3_h160_icomeshm4_s1x150_currs2tos10x3.yaml`
+
+Build and train either one with:
+
+```bash
+python scripts/build_graph.py \
+  --config configs/experiments/2p5_l3_h160_icomeshm5_s1x150_currs2tos10x3.yaml \
+  --config_name 2p5_l3_h160_icomeshm5_s1x150_currs2tos10x3
+
+python scripts/train.py \
+  --config configs/experiments/2p5_l3_h160_icomeshm5_s1x150_currs2tos10x3.yaml \
+  --config_name 2p5_l3_h160_icomeshm5_s1x150_currs2tos10x3
+```
 
 ## Capacity
 

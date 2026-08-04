@@ -73,3 +73,15 @@ env/
 *.swp
 *~
 dashboard/data/
+
+# --- Large binaries: generated decks + third-party papers --------------------
+# The .pptx decks are OUTPUTS of scripts/create_architecture_ppt.py and
+# scripts/annotate_architecture_results_ppt.py (both tracked), so they are
+# regenerable; ~76 MB of them would otherwise be permanent history. The archive
+# PDF is a third-party paper we do not own.
+*.pptx
+/archive/*.pdf
+
+# --- Claude Code per-machine settings ---------------------------------------
+# .claude/skills/ IS tracked (shared project tooling); this file is local-only.
+.claude/settings.local.json

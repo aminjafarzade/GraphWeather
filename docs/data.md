@@ -27,10 +27,14 @@ The KAI/ERA5 files are daily. The loader validates grid shape and channel-count
 compatibility against the active resolution profile — **do not reuse 5.625°
 statistics for a 2.5° run**, etc.
 
-Data/graph/stats paths are set per resolution profile in the config. Today those
-paths are absolute (`/lustre/…`); the target state moves them behind
-`${GW_DATA_ROOT}`-style environment interpolation + a `configs/base/paths.yaml`
-layer (`CONTRIBUTING.md §3.2`). A `.env.example` will document the variables.
+Data/graph/stats paths are set per resolution profile in the config. Graph and
+checkpoint paths are repo-root-relative, so the checkout can be moved freely. Data
+roots are still absolute: the 2.5°/5.625° sets resolve to `/home/amin/KAI_5/…` on
+this machine, and the 1.5° KAI set to `/lustre/home/mahmed/Hydro/kai_1p5_data`
+(another user's home — the one remaining external dependency). The target state
+moves both behind `${GW_DATA_ROOT}`-style environment interpolation + a
+`configs/base/paths.yaml` layer (`CONTRIBUTING.md §3.2`); `.env.example` documents
+the variables.
 
 ## Normalization stats & climatology
 

@@ -82,8 +82,11 @@ configs are still flat — see `docs/data.md` and the fix plan.)
 **3.2 No absolute paths in any config.** Data/graph/exp roots come from
 `configs/base/paths.yaml` using environment interpolation
 (`train_data_path: ${GW_DATA_ROOT}/era5_67/train`). A `.env.example` documents the
-variables. *Rationale: today 59/59 configs hardcode `/lustre/…`, 10 of them another
-user's home.*
+variables. *Status: repo-internal paths (`graph_path`, `init_from_checkpoint`,
+`exp_dir`) are now repo-root-relative, and the 2.5°/5.625° data roots point at this
+machine's local copy. The 1.5° KAI root is still an absolute path into another
+user's home (`/lustre/home/mahmed/Hydro/kai_1p5_data`) — that one is the remaining
+external dependency and the next candidate for `${GW_KAI_1P5_ROOT}`.*
 
 **3.3 Source configs contain no runtime metadata.** Never commit `name`,
 `experiment_dir`, `checkpoint_path`, or other resolved-run fields into a source
