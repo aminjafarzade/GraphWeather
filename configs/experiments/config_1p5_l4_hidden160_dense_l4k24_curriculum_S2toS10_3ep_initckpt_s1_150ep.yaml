@@ -375,7 +375,7 @@ dense_l4k24_1p5_hidden160_curriculum_S2toS10_3ep_initckpt_s1_150ep:
       train_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/train
       valid_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/valid
       test_dataset_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/test
-      graph_path: /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_1p5_121x240_k8_levelk8-8-8-8-24_hybrid_row_aware_L4_v5.pt
+      graph_path: graphs/graph_1p5_121x240_k8_levelk8-8-8-8-24_hybrid_row_aware_L4_v5.pt
       global_means_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_mean.npy
       global_stds_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_std.npy
       delta_stats_path: data/stats/kai_1p5_delta_stats.npz
@@ -520,7 +520,7 @@ dense_l4k24_1p5_hidden160_curriculum_S2toS10_3ep_initckpt_s1_150ep:
   device: cuda:0
   name: dense_l4k24_1p5_hidden160_curriculum_S2toS10_3ep_initckpt
   log_every_batches: 100
-  init_from_checkpoint: /lustre/home/ziya/GNN/GraphWeather5p625/runs/s1only_1p5_l4_hidden160_base_150epoch_dense_l4k24/best_ckpt.tar
+  init_from_checkpoint: runs/s1only_1p5_l4_hidden160_base_150epoch_dense_l4k24/best_ckpt.tar
   init_from_checkpoint_strict: true
   l4_k_neighbors: 24
   ema:

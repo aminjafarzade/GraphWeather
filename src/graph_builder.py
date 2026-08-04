@@ -920,6 +920,7 @@ def expected_graph_metadata(
 
 
 def graph_topology_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    graph_mode = str(metadata.get("graph_mode", "grid"))
     num_graph_levels = int(metadata.get("num_graph_levels", len(metadata.get("levels", {}) or {}) or 3))
     use_l3 = bool(metadata.get("use_l3", num_graph_levels >= 4))
     use_l4 = bool(metadata.get("use_l4", num_graph_levels >= 5))
@@ -928,7 +929,7 @@ def graph_topology_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     if raw_level_k is None and graph_k > 0:
         raw_level_k = [graph_k for _ in range(num_graph_levels)]
     level_k = [int(x) for x in raw_level_k] if raw_level_k is not None else None
-    return {
+    topology = {
         "resolution_mode": metadata.get("resolution_mode"),
         "hierarchy_type": metadata.get("hierarchy_type", "standard"),
         "graph_connectivity_strategy": metadata.get("graph_connectivity_strategy", metadata.get("connectivity_strategy")),
@@ -942,6 +943,48 @@ def graph_topology_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "use_l4": use_l4,
         "use_l4_ratio15": bool(metadata.get("use_l4_ratio15", False)),
     }
+    if graph_mode == "mesh":
+        # ``hierarchy_type`` in checkpoint architecture metadata describes the
+        # processor layout ("standard").  In a mesh cache it describes physical
+        # connectivity ("icosphere").  These are intentionally different concepts;
+        # canonicalize the cache-side value so an existing mesh checkpoint is not
+        # rejected merely because architecture metadata was written afterward.
+        topology["hierarchy_type"] = "icosphere"
+        topology.update(
+            {
+                "graph_mode": "mesh",
+                "mesh_format_version": metadata.get("mesh_format_version"),
+                "refinement": metadata.get("refinement"),
+                "grid_shape": metadata.get("grid_shape"),
+                "grid_coordinate_hash": metadata.get("grid_coordinate_hash"),
+                "bipartite_mapping_type": metadata.get(
+                    "bipartite_mapping_type",
+                    "graphcast_radius",
+                ),
+                "g2m_radius_factor": (
+                    metadata.get("g2m_radius_factor")
+                    if metadata.get(
+                        "bipartite_mapping_type",
+                        "graphcast_radius",
+                    )
+                    == "graphcast_radius"
+                    else None
+                ),
+                "coarse_level_connectivity": metadata.get("coarse_level_connectivity"),
+                "grid_attention_graph": metadata.get("grid_attention_graph", False),
+                "grid_attention_k_neighbors": metadata.get("grid_attention_k_neighbors"),
+                "grid_attention_connectivity_strategy": metadata.get(
+                    "grid_attention_connectivity_strategy"
+                ),
+                "grid_attention_reference_graph": metadata.get(
+                    "grid_attention_reference_graph"
+                ),
+                "grid_attention_reference_sha256": metadata.get(
+                    "grid_attention_reference_sha256"
+                ),
+            }
+        )
+    return topology
 
 
 def validate_graph_cache_metadata(bundle: dict[str, Any], expected: dict[str, Any]) -> list[str]:
@@ -1373,6 +1416,7 @@ def main() -> None:
             lon_start=args.lon_start,
         )
 
+    mesh_cfg = dict(getattr(params, "mesh_encoder", {}) or {}) if params is not None else {}
     output = args.output
     if output is None and params is not None and (
         cli_num_graph_levels is None or int(cli_num_graph_levels) == int(getattr(params, "num_graph_levels", 3))
@@ -1390,6 +1434,89 @@ def main() -> None:
             use_l4_ratio15=use_l4_ratio15,
         )
     output = os.path.abspath(output)
+
+    # Icosphere mesh mode (mesh_encoder.enabled): build a mesh bundle instead of
+    # the lat-lon graph, using the data's own lat/lon axes (row-major over lat,lon).
+    if bool(mesh_cfg.get("enabled", False)):
+        from .mesh_builder import (
+            bipartite_edge_feature_set,
+            bipartite_mapping_type,
+            build_and_save,
+            expected_mesh_metadata,
+            validate_mesh_cache_metadata,
+        )
+        lat = latitudes.detach().cpu().numpy() if hasattr(latitudes, "detach") else np.asarray(latitudes)
+        lon = longitudes.detach().cpu().numpy() if hasattr(longitudes, "detach") else np.asarray(longitudes)
+        lat = np.asarray(lat, dtype=np.float64)
+        lon = np.asarray(lon, dtype=np.float64)
+        lat_grid, lon_grid = np.meshgrid(lat, lon, indexing="ij")
+        grid_ll = np.deg2rad(np.stack([lat_grid.reshape(-1), lon_grid.reshape(-1)], axis=1)).astype(np.float32)
+        bipartite_features = bipartite_edge_feature_set(
+            mesh_cfg.get("boundary_type", "legacy")
+        )
+        bipartite_mapping = bipartite_mapping_type(
+            mesh_cfg.get("boundary_type", "legacy")
+        )
+        grid_attention_enabled = (
+            int(mesh_cfg.get("grid_attention_encoder_blocks", 0)) > 0
+            or int(mesh_cfg.get("grid_attention_decoder_blocks", 0)) > 0
+        )
+        grid_attention_k = (
+            int(mesh_cfg.get("grid_attention_k_neighbors", 8))
+            if grid_attention_enabled
+            else None
+        )
+        grid_attention_reference = (
+            getattr(params, "grid_attention_reference_graph_path", None)
+            if params is not None
+            else None
+        )
+        expected_mesh = expected_mesh_metadata(
+            refinement=int(mesh_cfg.get("refinement", 5)),
+            num_graph_levels=int(args.num_graph_levels),
+            grid_shape=(int(lat.shape[0]), int(lon.shape[0])),
+            grid_lat_lon=grid_ll,
+            g2m_radius_factor=float(mesh_cfg.get("g2m_radius_factor", 0.6)),
+            resolution_mode=args.resolution_mode,
+            bipartite_mapping_type=bipartite_mapping,
+            bipartite_edge_features=bipartite_features,
+            coarse_level_connectivity=str(
+                mesh_cfg.get("coarse_level_connectivity", "native_icosphere")
+            ),
+            grid_attention_k_neighbors=grid_attention_k,
+            grid_attention_connectivity_strategy=strategy,
+            grid_attention_row_aware_knn=row_aware_knn,
+            grid_attention_reference_graph_path=grid_attention_reference,
+        )
+        if os.path.isfile(output) and not args.force_rebuild:
+            cached = load_raw_graph_bundle(output)
+            mismatches = validate_mesh_cache_metadata(cached, expected_mesh)
+            if not mismatches:
+                print(f"Mesh graph cache already present: {output}")
+                return
+            print(f"Mesh graph cache metadata mismatch for {output}; rebuilding.")
+            for mismatch in mismatches:
+                print(f"  {mismatch}")
+        meta = build_and_save(
+            output,
+            refinement=int(mesh_cfg.get("refinement", 5)),
+            num_graph_levels=int(args.num_graph_levels or 4),
+            grid_shape=(int(lat.shape[0]), int(lon.shape[0])),
+            grid_lat_lon=grid_ll,
+            g2m_radius_factor=float(mesh_cfg.get("g2m_radius_factor", 0.6)),
+            resolution_mode=args.resolution_mode,
+            bipartite_mapping_type=bipartite_mapping,
+            bipartite_edge_features=bipartite_features,
+            coarse_level_connectivity=str(
+                mesh_cfg.get("coarse_level_connectivity", "native_icosphere")
+            ),
+            grid_attention_k_neighbors=grid_attention_k,
+            grid_attention_connectivity_strategy=strategy,
+            grid_attention_row_aware_knn=row_aware_knn,
+            grid_attention_reference_graph_path=grid_attention_reference,
+        )
+        print(f"saved icosphere mesh bundle {output} : {meta}")
+        return
 
     expected = expected_graph_metadata(
         latitudes,

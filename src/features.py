@@ -500,7 +500,10 @@ class RolloutFeatureBuilder:
 
     def _prepare_spatial_features(self) -> None:
         if self.settings.lat_lon_sincos:
-            lat_lon = self.graph.L0.lat_lon.detach().to(torch.float32)
+            if str(getattr(self.graph, "graph_mode", "grid")) == "mesh":
+                lat_lon = self.graph.grid_lat_lon.detach().to(torch.float32)
+            else:
+                lat_lon = self.graph.L0.lat_lon.detach().to(torch.float32)
             lat_rad = _coordinate_to_radians(lat_lon[:, 0], coordinate="lat")
             lon_rad = _coordinate_to_radians(lat_lon[:, 1], coordinate="lon")
             self._lat_lon_node_features = torch.stack(
@@ -572,7 +575,10 @@ class RolloutFeatureBuilder:
             self.logger.warning("WARNING: %s Skipping this auxiliary feature.", message)
             return None
 
-        height, width = int(self.graph.L0.height), int(self.graph.L0.width)
+        if str(getattr(self.graph, "graph_mode", "grid")) == "mesh":
+            height, width = int(self.graph.grid_height), int(self.graph.grid_width)
+        else:
+            height, width = int(self.graph.L0.height), int(self.graph.L0.width)
         field = np.asarray(field, dtype=np.float32).squeeze()
         if field.shape != (height, width):
             message = f"Static feature {canonical!r} shape {field.shape} does not match grid {(height, width)}."

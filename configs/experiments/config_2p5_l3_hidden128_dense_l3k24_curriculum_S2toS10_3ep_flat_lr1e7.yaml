@@ -281,12 +281,12 @@ dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7:
         - 36
       - - 9
         - 18
-      train_data_path: /lustre/home/ziya/KAI_5/era5_67/train
-      valid_data_path: /lustre/home/ziya/KAI_5/era5_67/val
-      test_dataset_path: /lustre/home/ziya/KAI_5/era5_67/test
-      graph_path: /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
-      global_means_path: /lustre/home/ziya/KAI_5/era5_67/stats/global_mean.npy
-      global_stds_path: /lustre/home/ziya/KAI_5/era5_67/stats/global_std.npy
+      train_data_path: /home/amin/KAI_5/era5_67/train
+      valid_data_path: /home/amin/KAI_5/era5_67/val
+      test_dataset_path: /home/amin/KAI_5/era5_67/test
+      graph_path: graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
+      global_means_path: /home/amin/KAI_5/era5_67/stats/global_mean.npy
+      global_stds_path: /home/amin/KAI_5/era5_67/stats/global_std.npy
       delta_stats_path: data/stats/era5_67_2p5_delta_stats.npz
       batch_size: 4
       gradient_accumulation_steps: 3
@@ -362,12 +362,12 @@ dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7:
     - 36
   - - 9
     - 18
-  train_data_path: /lustre/home/ziya/KAI_5/era5_67/train
-  valid_data_path: /lustre/home/ziya/KAI_5/era5_67/val
-  test_dataset_path: /lustre/home/ziya/KAI_5/era5_67/test
+  train_data_path: /home/amin/KAI_5/era5_67/train
+  valid_data_path: /home/amin/KAI_5/era5_67/val
+  test_dataset_path: /home/amin/KAI_5/era5_67/test
   graph_path: graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
-  global_means_path: /lustre/home/ziya/KAI_5/era5_67/stats/global_mean.npy
-  global_stds_path: /lustre/home/ziya/KAI_5/era5_67/stats/global_std.npy
+  global_means_path: /home/amin/KAI_5/era5_67/stats/global_mean.npy
+  global_stds_path: /home/amin/KAI_5/era5_67/stats/global_std.npy
   hierarchy_type: standard
   use_l4_ratio15: false
   resolution: 2.5
@@ -423,10 +423,10 @@ dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7:
     phases: []
   device: cuda:0
   name: dense_l3k24_curriculum_S2toS10_3ep_flat_lr1e7
-  experiment_dir: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24
-  checkpoint_path: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/ckpt.tar
-  last_checkpoint_path: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/last_ckpt.tar
-  best_checkpoint_path: /lustre/home/ziya/GNN/GraphWeather5p625/experiments/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/best_ckpt.tar
+  experiment_dir: runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24
+  checkpoint_path: runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/ckpt.tar
+  last_checkpoint_path: runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/last_ckpt.tar
+  best_checkpoint_path: runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/best_ckpt.tar
   log_every_batches: 100
-  init_from_checkpoint: /lustre/home/ziya/GNN/GraphWeather5p625/runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/best_ckpt.tar
+  init_from_checkpoint: runs/s1only_2p5_l3_hidden128_base_100epoch_dense_l3k24/best_ckpt.tar
   init_from_checkpoint_strict: true

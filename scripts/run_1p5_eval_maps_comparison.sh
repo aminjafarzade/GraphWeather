@@ -44,7 +44,7 @@ export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="${GPU}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-cache}"
-PYTHON="${PYTHON:-/lustre/home/ziya/miniconda3/envs/graphweather-cu128/bin/python}"
+PYTHON="${PYTHON:-$HOME/miniconda3/envs/graphweather-cu128/bin/python}"
 
 MODEL="${MODEL:-l3_h128}"
 DRY_RUN="${DRY_RUN:-0}"

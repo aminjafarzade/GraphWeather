@@ -27,7 +27,15 @@ except ImportError:  # pragma: no cover - optional dependency
 
 DEFAULT_WANDB_ENTITY = "amin1jafarzade-kaist"
 
-from .architecture import architecture_metadata, resolve_lead_conditioning, validate_checkpoint_architecture
+# How much of the hot path torch.compile wraps. See Trainer._maybe_compile_model.
+COMPILE_SCOPES = ("none", "processor", "full")
+
+from .architecture import (
+    architecture_metadata,
+    resolve_lead_conditioning,
+    validate_checkpoint_architecture,
+    validate_checkpoint_graph_mode,
+)
 from .data import DataConfig, build_data_loader
 from .delta_stats import compute_delta_stats, load_delta_stats
 from .diagnostics import DiagnosticsManager
@@ -43,6 +51,7 @@ from .graph_builder import (
     validate_graph_cache_metadata,
 )
 from .graph_bundle import load_graph_bundle
+from .layers import ATTENTION_IMPL_DEFAULT, resolve_attention_impl
 from .lead_conditioning import format_lead_sequence, lead_conditioning_debug_values
 from .losses import LatitudeWeightedMSE, graph_gradient_loss, low_frequency_spectral_loss
 from .lr_schedulers import RolloutStageWarmupCosineScheduler
@@ -217,6 +226,13 @@ class Trainer:
         self.rollout_loss_weights_config = _get(params, "rollout_loss_weights", "uniform")
         self.activation_checkpointing = bool(_get(params, "activation_checkpointing", False))
         self.checkpoint_rollout_steps = bool(_get(params, "checkpoint_rollout_steps", False))
+        # Numerically equivalent, so this is purely a memory/throughput switch.
+        # Defaults off so every pre-existing config keeps its measured baseline;
+        # the _perfctl configs turn it on.
+        self.edge_projection_cache = bool(_get(params, "edge_projection_cache", False))
+        self.attention_impl = resolve_attention_impl(
+            _get(params, "attention_impl", ATTENTION_IMPL_DEFAULT)
+        )
         if self.rollout_mode == "fixed_full":
             stage_based_schedulers = {"rollout_stage_warmup_cosine", "rollout_stage", "manual_by_rollout"}
             if self.lr_schedule_type in stage_based_schedulers:
@@ -422,6 +438,9 @@ class Trainer:
         self.delta_norm_eps = float(_get(params, "delta_norm_eps", 1.0e-6))
         self.delta_stats_path = self._resolve_optional_path(_get(params, "delta_stats_path", None))
         delta_mean, delta_std = self._prepare_delta_normalization_stats(int(out_chans))
+        # Kept for loss_channel_weighting.inverse_tendency_variance (GraphCast s_j).
+        # Already in normalized-state units, so sigma_state == 1 by construction.
+        self.loss_delta_std_norm = delta_std
 
         self.model = GraphWeatherModel(
             graph=self.graph,
@@ -457,6 +476,11 @@ class Trainer:
             delta_norm_center=self.delta_norm_center,
             delta_norm_eps=self.delta_norm_eps,
             aux_feature_dim=int(self.feature_builder.aux_feature_dim),
+            mesh_encoder=dict(_get(params, "mesh_encoder", {}) or {}),
+            edge_encoding=dict(_get(params, "edge_encoding", {}) or {}),
+            attention_impl=self.attention_impl,
+            boundary_mlp=bool(_get(params, "boundary_mlp", False)),
+            head_init_std=float(_get(params, "head_init_std", 0.0)),
         ).to(self.device)
         self._apply_trainable_scope(str(_get(params, "trainable_scope", "all")))
 
@@ -473,7 +497,13 @@ class Trainer:
         self.gscaler = amp.GradScaler("cuda", enabled=True) if self.scaler_enabled else None
         self.resolved_amp_dtype_name = _amp_dtype_name(self.amp_dtype)
 
-        l0_lat = self.graph.L0.lat_lon[:, 0].reshape(self.graph.L0.height, self.graph.L0.width)[:, 0]
+        if str(getattr(self.graph, "graph_mode", "grid")) == "mesh":
+            l0_lat = self.graph.grid_lat_lon[:, 0].reshape(
+                int(self.graph.grid_height),
+                int(self.graph.grid_width),
+            )[:, 0]
+        else:
+            l0_lat = self.graph.L0.lat_lon[:, 0].reshape(self.graph.L0.height, self.graph.L0.width)[:, 0]
         self.loss_channel_weight_cfg = dict(_get(params, "loss_channel_weighting", {}) or {})
         loss_channel_weights = self._build_loss_channel_weights(
             channel_names=getattr(self.train_dataset, "channel_names", None),
@@ -549,7 +579,7 @@ class Trainer:
         # state_dict keys to processor._orig_mod.*, which would not match a stored
         # checkpoint. Saving goes back through _canonical_model_state() so written
         # checkpoints stay in the uncompiled key format either way.
-        self._maybe_compile_processor()
+        self._maybe_compile_model()
 
         logging.info("Number of trainable model parameters: %d", self.num_parameters)
         self._log_architecture_config()
@@ -560,38 +590,76 @@ class Trainer:
         self._log_initial_pooling_gates()
         self._save_startup_artifacts()
 
-    def _maybe_compile_processor(self) -> None:
-        """torch.compile the processor submodule when ``compile_processor`` is set.
+    def _resolve_compile_scope(self) -> str:
+        """``none`` | ``processor`` | ``full``.
 
-        Compiling the *processor* rather than the whole model is deliberate: the
-        training hot path calls ``self.model.forward_steps(...)``, and
-        ``torch.compile`` only intercepts ``__call__``/``forward``, so compiling
-        the top-level model is a silent no-op. The processor is invoked through
-        ``__call__`` and carries the bulk of the compute.
+        ``compile_scope`` wins when set; otherwise the older boolean
+        ``compile_processor`` selects between ``processor`` and ``none``, so
+        existing configs keep their behaviour.
         """
-        if not bool(_get(self.params, "compile_processor", False)):
+        params = getattr(self, "params", {})
+        scope = _get(params, "compile_scope", None)
+        if scope is None:
+            return "processor" if bool(_get(params, "compile_processor", False)) else "none"
+        scope = str(scope).strip().lower()
+        if scope not in COMPILE_SCOPES:
+            raise ValueError(f"compile_scope must be one of {COMPILE_SCOPES}, got {scope!r}")
+        return scope
+
+    def _maybe_compile_model(self) -> None:
+        """torch.compile the hot path at the configured scope.
+
+        ``processor`` compiles the ``GraphUNetProcessor`` submodule: 9 of the 11
+        attention blocks, invoked through ``__call__`` so compile intercepts it.
+        It leaves the encoder and decoder blocks eager -- and those two run at L0,
+        the widest level, so they are not cheap to skip.
+
+        ``full`` instead compiles ``model.forward_steps``. Compiling the *module*
+        would be a silent no-op: the training hot path calls ``forward_steps``, not
+        ``forward``, and torch.compile on an nn.Module only intercepts
+        ``__call__``/``forward``. Compiling the bound method covers embed, encoder,
+        processor, decoder, head, the adapter reshapes and the delta denormalization
+        in one graph, and -- unlike the module wrapper -- it does not rename any
+        parameters, so ``_canonical_*`` have nothing to strip.
+
+        EMA is supported at both scopes: the shadow/backup dicts are keyed through
+        _canonical_named_parameters(), so their keys never carry the compile
+        `_orig_mod.` prefix and stay interchangeable with an eager run's.
+        """
+        scope = self._resolve_compile_scope()
+        if scope == "none":
             return
-        processor = getattr(self.model, "processor", None)
-        if processor is None:
-            logging.warning("compile_processor is set but the model has no .processor; skipping compile.")
-            return
-        if getattr(self, "ema_enabled", False):
-            # The EMA shadow/backup dicts are keyed by live parameter names, which
-            # compile rewrites to *._orig_mod.*; that path is untested, so refuse
-            # rather than silently write EMA state under mismatched keys.
-            raise RuntimeError(
-                "compile_processor is not supported together with EMA "
-                "(ema.enabled); disable one of them."
-            )
         mode = str(_get(self.params, "compile_processor_mode", "default"))
-        try:
-            self.model.processor = torch.compile(processor, mode=mode)
-        except Exception:
-            # A compile failure must never cost a training run; fall back to eager.
-            logging.exception("torch.compile(model.processor) failed; continuing uncompiled.")
+        if scope == "processor":
+            processor = getattr(self.model, "processor", None)
+            if processor is None:
+                logging.warning("compile_scope=processor but the model has no .processor; skipping compile.")
+                return
+            try:
+                self.model.processor = torch.compile(processor, mode=mode)
+            except Exception:
+                # A compile failure must never cost a training run; fall back to eager.
+                logging.exception("torch.compile(model.processor) failed; continuing uncompiled.")
+                return
+            self._processor_compiled = True
+            logging.info("Compiled model.processor with torch.compile(mode=%s).", mode)
             return
-        self._processor_compiled = True
-        logging.info("Compiled model.processor with torch.compile(mode=%s).", mode)
+        forward_steps = getattr(self.model, "forward_steps", None)
+        if forward_steps is None:
+            logging.warning("compile_scope=full but the model has no .forward_steps; skipping compile.")
+            return
+        try:
+            # Instance attribute shadows the bound method, so every existing
+            # `self.model.forward_steps(...)` call site picks up the compiled one.
+            self.model.forward_steps = torch.compile(forward_steps, mode=mode)
+        except Exception:
+            logging.exception("torch.compile(model.forward_steps) failed; continuing uncompiled.")
+            return
+        self._model_compiled = True
+        logging.info("Compiled model.forward_steps with torch.compile(mode=%s).", mode)
+
+    # Back-compat alias: the old name is referenced in comments and downstream notes.
+    _maybe_compile_processor = _maybe_compile_model
 
     def _canonical_model_state(self) -> dict[str, Any]:
         """Model state_dict with any torch.compile ``_orig_mod.`` prefixes removed.
@@ -603,6 +671,20 @@ class Trainer:
         if not getattr(self, "_processor_compiled", False):
             return state
         return {key.replace("._orig_mod.", "."): value for key, value in state.items()}
+
+    def _canonical_named_parameters(self):
+        """``(name, param)`` with the torch.compile ``_orig_mod.`` prefix removed.
+
+        The EMA shadow/backup dicts are keyed by these names so a shadow written by
+        a compiled run and one written by an eager run are interchangeable. That
+        matters most at resume: ``_restore_checkpoint`` runs *before*
+        ``_maybe_compile_processor``, so it sees uncompiled names and would silently
+        drop every processor parameter from the shadow if the saved keys carried the
+        compile prefix.
+        """
+        compiled = bool(getattr(self, "_processor_compiled", False))
+        for name, param in self.model.named_parameters():
+            yield (name.replace("._orig_mod.", ".") if compiled else name), param
 
     def _optional_positive_int(self, name: str) -> int | None:
         value = _get(self.params, name, None)
@@ -944,6 +1026,9 @@ class Trainer:
             "rollout_loss_weights": self._rollout_loss_weights_metadata(),
             "batch_size": self.batch_size,
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
+            "attention_impl": str(getattr(self, "attention_impl", ATTENTION_IMPL_DEFAULT)),
+            "edge_projection_cache": bool(getattr(self, "edge_projection_cache", False)),
+            "compile_scope": self._resolve_compile_scope(),
         }
         if self.rollout_mode == "random":
             metadata["random_rollout"] = self._random_rollout_config()
@@ -1458,7 +1543,14 @@ class Trainer:
                 "loss/overfit_gap_S1": overfit_gap,
             }
         )
+        # Primary outcomes of the attention-matmul / edge-cache control: the skill
+        # metrics above are the control, these two are the deliverable.
+        payload["perf/median_step_time_s"] = _finite_or_nan(train_logs.get("median_step_time_sec"))
+        payload["perf/attention_impl"] = str(getattr(self, "attention_impl", ATTENTION_IMPL_DEFAULT))
+        payload["perf/edge_projection_cache"] = bool(self.edge_projection_cache)
+        payload["perf/compile_scope"] = self._resolve_compile_scope()
         if cuda_peak_allocated_gb is not None:
+            payload["perf/peak_memory_allocated_gb"] = float(cuda_peak_allocated_gb)
             payload["system/gpu_peak_allocated_mb"] = float(cuda_peak_allocated_gb * 1024.0)
             payload["diagnostics_system/gpu_peak_allocated_mb"] = float(cuda_peak_allocated_gb * 1024.0)
         if cuda_peak_reserved_gb is not None:
@@ -1822,8 +1914,111 @@ class Trainer:
             dict(_get(self.params, "row_aware_knn", {}) or {}),
         )
 
+    def _ensure_mesh_graph(self, graph_path: str, mesh_cfg: dict) -> dict[str, Any]:
+        """Build/validate an icosphere mesh bundle (mesh_encoder mode). Uses the
+        training data's own lat/lon axes so grid<->mesh edges align with the grid
+        nodes the GridNodeAdapter produces (row-major over lat, lon)."""
+        from .mesh_builder import (
+            bipartite_edge_feature_set,
+            bipartite_mapping_type,
+            build_and_save,
+            expected_mesh_metadata,
+            validate_mesh_cache_metadata,
+        )
+
+        num_graph_levels = int(_get(self.params, "num_graph_levels", 4))
+        latitudes, longitudes = lat_lon_from_netcdf(self.params.train_data_path)
+        lat = latitudes.detach().cpu().numpy() if hasattr(latitudes, "detach") else np.asarray(latitudes)
+        lon = longitudes.detach().cpu().numpy() if hasattr(longitudes, "detach") else np.asarray(longitudes)
+        lat = np.asarray(lat, dtype=np.float64)
+        lon = np.asarray(lon, dtype=np.float64)
+        lat_grid, lon_grid = np.meshgrid(lat, lon, indexing="ij")
+        grid_ll = np.deg2rad(np.stack([lat_grid.reshape(-1), lon_grid.reshape(-1)], axis=1)).astype(np.float32)
+        grid_shape = (int(lat.shape[0]), int(lon.shape[0]))
+        resolution_mode = _get(self.params, "resolution_mode", None)
+        bipartite_features = bipartite_edge_feature_set(
+            mesh_cfg.get("boundary_type", "legacy")
+        )
+        bipartite_mapping = bipartite_mapping_type(
+            mesh_cfg.get("boundary_type", "legacy")
+        )
+        grid_attention_enabled = (
+            int(mesh_cfg.get("grid_attention_encoder_blocks", 0)) > 0
+            or int(mesh_cfg.get("grid_attention_decoder_blocks", 0)) > 0
+        )
+        grid_attention_k = (
+            int(mesh_cfg.get("grid_attention_k_neighbors", 8))
+            if grid_attention_enabled
+            else None
+        )
+        grid_attention_strategy = str(
+            _get(self.params, "graph_connectivity_strategy", "hybrid_row_aware_knn")
+        )
+        grid_attention_row_aware = dict(
+            _get(self.params, "row_aware_knn", {}) or {}
+        )
+        grid_attention_reference = _get(
+            self.params,
+            "grid_attention_reference_graph_path",
+            None,
+        )
+        expected = expected_mesh_metadata(
+            refinement=int(mesh_cfg.get("refinement", 5)),
+            num_graph_levels=num_graph_levels,
+            grid_shape=grid_shape,
+            grid_lat_lon=grid_ll,
+            g2m_radius_factor=float(mesh_cfg.get("g2m_radius_factor", 0.6)),
+            resolution_mode=None if resolution_mode is None else str(resolution_mode),
+            bipartite_mapping_type=bipartite_mapping,
+            bipartite_edge_features=bipartite_features,
+            coarse_level_connectivity=str(
+                mesh_cfg.get("coarse_level_connectivity", "native_icosphere")
+            ),
+            grid_attention_k_neighbors=grid_attention_k,
+            grid_attention_connectivity_strategy=grid_attention_strategy,
+            grid_attention_row_aware_knn=grid_attention_row_aware,
+            grid_attention_reference_graph_path=grid_attention_reference,
+        )
+        if os.path.isfile(graph_path):
+            raw = load_raw_graph_bundle(graph_path, map_location="cpu")
+            mismatches = validate_mesh_cache_metadata(raw, expected)
+            if not mismatches:
+                return dict(raw.get("metadata", {}) or {})
+            logging.warning(
+                "Rebuilding mismatched icosphere mesh bundle %s: %s",
+                graph_path,
+                "; ".join(mismatches),
+            )
+        if not bool(_get(self.params, "auto_build_graph", True)):
+            raise FileNotFoundError(
+                f"Matching mesh graph bundle not found and auto_build_graph disabled: {graph_path}"
+            )
+        meta = build_and_save(
+            graph_path,
+            refinement=int(mesh_cfg.get("refinement", 5)),
+            num_graph_levels=num_graph_levels,
+            grid_shape=grid_shape,
+            grid_lat_lon=grid_ll,
+            g2m_radius_factor=float(mesh_cfg.get("g2m_radius_factor", 0.6)),
+            resolution_mode=None if resolution_mode is None else str(resolution_mode),
+            bipartite_mapping_type=bipartite_mapping,
+            bipartite_edge_features=bipartite_features,
+            coarse_level_connectivity=str(
+                mesh_cfg.get("coarse_level_connectivity", "native_icosphere")
+            ),
+            grid_attention_k_neighbors=grid_attention_k,
+            grid_attention_connectivity_strategy=grid_attention_strategy,
+            grid_attention_row_aware_knn=grid_attention_row_aware,
+            grid_attention_reference_graph_path=grid_attention_reference,
+        )
+        logging.info("Built icosphere mesh bundle at %s: %s", graph_path, meta)
+        return dict(meta)
+
     def _ensure_graph(self) -> dict[str, Any]:
         graph_path = self.params.graph_path
+        mesh_cfg = dict(_get(self.params, "mesh_encoder", {}) or {})
+        if bool(mesh_cfg.get("enabled", False)):
+            return self._ensure_mesh_graph(graph_path, mesh_cfg)
         k, resolution, strategy, row_aware_knn = self._graph_build_options()
         num_graph_levels = int(_get(self.params, "num_graph_levels", 3))
         level_k_neighbors = [int(x) for x in _get(self.params, "level_k_neighbors", [k] * num_graph_levels)]
@@ -1903,7 +2098,7 @@ class Trainer:
         num_heads = int(_get(self.params, "num_heads", _get(self.params, "heads", 4)))
         assert hidden_dim % num_heads == 0, f"hidden_dim={hidden_dim} must be divisible by num_heads={num_heads}"
         head_dim = hidden_dim // num_heads
-        return [
+        lines = [
             f"use_l3: {str(bool(_get(self.params, 'use_l3', False))).lower()}",
             f"use_l4_ratio15: {str(bool(_get(self.params, 'use_l4_ratio15', False))).lower()}",
             f"hierarchy_type: {_get(self.params, 'hierarchy_type', 'standard')}",
@@ -1928,6 +2123,10 @@ class Trainer:
             f"l0_refine_blocks: {int(_get(self.params, 'l0_refine_blocks', 1))}",
             f"trainable_parameters: {self.num_parameters}",
         ]
+        mesh_encoder = _get(self.params, "mesh_encoder", None)
+        if isinstance(mesh_encoder, dict):
+            lines.insert(13, f"mesh_encoder: {mesh_encoder}")
+        return lines
 
     def _skip_fusion_config(self) -> dict[str, Any]:
         raw = _get(self.params, "skip_fusion", None)
@@ -2186,6 +2385,29 @@ class Trainer:
             return self.model.forward_steps(previous, current, diagnostics_collector=diagnostics_collector)
         return self.model.forward_steps(previous, current, aux_features=aux_features, diagnostics_collector=diagnostics_collector)
 
+    def _edge_cache_scope(self, warm: bool = True):
+        """Lifetime of the shared static edge projections. See GraphWeatherModel.
+
+        Training passes ``warm=False`` and wraps forward *and* backward, because
+        checkpointed rollout steps recompute during backward and would see a
+        different op sequence if the cache went away first. Warming then happens in
+        ``_warm_edge_cache`` from inside the autocast region.
+        """
+        model = getattr(self, "model", None)
+        if not getattr(self, "edge_projection_cache", False) or not hasattr(model, "edge_cache_scope"):
+            return nullcontext()
+        return model.edge_cache_scope(warm=warm)
+
+    def _warm_edge_cache(self) -> None:
+        """Populate the edge cache. Call from inside autocast, before the rollout loop.
+
+        A no-op outside an ``_edge_cache_scope``, so the rollout works unchanged for
+        callers that never open one.
+        """
+        model = getattr(self, "model", None)
+        if getattr(self, "edge_projection_cache", False) and getattr(model, "edge_cache_enabled", False):
+            model.warm_edge_cache()
+
     def _forward_model_step_train(
         self,
         previous: torch.Tensor,
@@ -2240,6 +2462,13 @@ class Trainer:
             ends in digits (e.g. ``u850``, ``z500``) are weighted proportional
             to that pressure level, normalized so the mean weight over the
             distinct levels is 1 (same scale as surface channels = 1).
+            ``reference_level`` (default 0.0) overrides that normalization when
+            > 0: the divisor becomes the given absolute level, so e.g. 1000 puts
+            weight 1.0 at 1000 hPa and makes the weights independent of which
+            levels happen to be present. ``min_level_weight`` (default 0.0) is a
+            floor applied to the level term, so the final level weight is
+            ``max(min_level_weight, level / denom)``. Both defaults reproduce the
+            original mean-level behaviour exactly.
         (ii) modest per-variable up-weighting via ``variable_upweights``,
             applied multiplicatively by exact channel name (e.g. t2m:2.0,
             z500:2.0).
@@ -2253,6 +2482,11 @@ class Trainer:
             return None
         pressure = bool(cfg.get("pressure_weighting", True))
         upweights = dict(cfg.get("variable_upweights", {}) or {})
+        min_level_weight = float(cfg.get("min_level_weight", 0.0))
+        reference_level = float(cfg.get("reference_level", 0.0))
+        inverse_tendency_variance = bool(cfg.get("inverse_tendency_variance", False))
+        itv_exponent = float(cfg.get("itv_exponent", 2.0))
+        itv_min_std = float(cfg.get("itv_min_std", 0.01))
         num_channels = int(num_channels)
         names = [str(x) for x in channel_names] if channel_names else []
         if len(names) != num_channels:
@@ -2263,19 +2497,117 @@ class Trainer:
             levels.append(int(m.group(1)) if m else None)
         present = sorted({lv for lv in levels if lv is not None})
         mean_level = (sum(present) / len(present)) if present else 1.0
+        # reference_level > 0 pins the scale to an absolute level (e.g. 1000 ->
+        # weight 1.0 at 1000 hPa); otherwise keep the mean-level normalization.
+        denom = reference_level if reference_level > 0 else mean_level
         weights = [1.0] * num_channels
         if pressure:
             for i, lv in enumerate(levels):
                 if lv is not None:
-                    weights[i] = float(lv) / float(mean_level)
+                    weights[i] = max(min_level_weight, float(lv) / float(denom))
         for i, name in enumerate(names):
             if name in upweights:
                 weights[i] *= float(upweights[name])
+        itv_factors: list[float] | None = None
+        itv_std: list[float] | None = None
+        if inverse_tendency_variance:
+            delta_std_norm = getattr(self, "loss_delta_std_norm", None)
+            if delta_std_norm is None:
+                raise ValueError(
+                    "loss_channel_weighting.inverse_tendency_variance=true requires the "
+                    "normalized-state delta stats; set use_delta_normalization=true and "
+                    "delta_stats_path."
+                )
+            itv_std = [float(x) for x in delta_std_norm.detach().cpu().reshape(-1).tolist()]
+            if len(itv_std) != num_channels:
+                raise ValueError(
+                    f"delta_std length {len(itv_std)} does not match channels {num_channels}."
+                )
+            itv_factors = [
+                1.0 / (max(itv_min_std, itv_std[i]) ** itv_exponent) for i in range(num_channels)
+            ]
+            for i in range(num_channels):
+                weights[i] *= itv_factors[i]
+            # Channels the loss excludes (orog/tisr forcings) carry weight 0 and are
+            # left out of the normalization, so the mean over *scored* channels is 1.
+            mask = getattr(self, "loss_channel_mask", None)
+            if mask is None:
+                included = [True] * num_channels
+            else:
+                mask_vals = [float(x) for x in mask.detach().cpu().reshape(-1).tolist()]
+                included = [bool(mask_vals[i] > 0.0) for i in range(num_channels)]
+            for i in range(num_channels):
+                if not included[i]:
+                    weights[i] = 0.0
+            included_count = sum(1 for flag in included if flag)
+            mean_included = (
+                sum(weights[i] for i in range(num_channels) if included[i]) / included_count
+                if included_count > 0
+                else 0.0
+            )
+            if mean_included > 0.0:
+                weights = [w / mean_included for w in weights]
+            scored = [weights[i] for i in range(num_channels) if included[i]]
+            lo, hi = (min(scored), max(scored)) if scored else (0.0, 0.0)
+            logging.info(
+                "LOSS_ITV_SUMMARY | exponent=%.4f min_std=%.4f scored_channels=%d "
+                "min_weight=%.6g max_weight=%.6g max_over_min=%.6g mean_weight=1.0",
+                itv_exponent, itv_min_std, included_count, lo, hi,
+                (hi / lo) if lo > 0.0 else float("inf"),
+            )
+            # Inverse-variance weighting can hand almost the whole loss to one
+            # low-tendency channel (e.g. a forcing left in the loss). Surface that
+            # before any GPU time is spent rather than after 100 epochs.
+            weight_total = sum(scored)
+            if weight_total > 0.0:
+                for i, name in enumerate(names):
+                    if not included[i]:
+                        continue
+                    share = weights[i] / weight_total
+                    if share > 0.10:
+                        logging.warning(
+                            "LOSS_ITV_CONCENTRATION | channel %s carries %.1f%% of the total loss "
+                            "weight (weight=%.4g of sum=%.4g over %d scored channels). "
+                            "inverse_tendency_variance is amplifying a very low-tendency channel; "
+                            "consider excluding it from the loss or lowering itv_exponent.",
+                            name, share * 100.0, weights[i], weight_total, included_count,
+                        )
+            for i, name in enumerate(names):
+                logging.info(
+                    "LOSS_ITV | ch=%-6s delta_std_norm=%.6g itv_factor=%.6g final_weight=%.6g "
+                    "scored=%s",
+                    name, itv_std[i], itv_factors[i], weights[i], included[i],
+                )
+        # Record the resolved knobs (including defaults) so runs/<name>/
+        # config_resolved.yaml documents exactly what the loss used.
+        resolved_cfg = dict(cfg)
+        resolved_cfg["min_level_weight"] = min_level_weight
+        resolved_cfg["reference_level"] = reference_level
+        resolved_cfg["inverse_tendency_variance"] = inverse_tendency_variance
+        resolved_cfg["itv_exponent"] = itv_exponent
+        resolved_cfg["itv_min_std"] = itv_min_std
+        self.loss_channel_weight_cfg = resolved_cfg
+        if getattr(self, "params", None) is not None:
+            _set(self.params, "loss_channel_weighting", resolved_cfg)
         logging.info(
             "Loss channel weighting enabled: pressure_weighting=%s upweights=%s "
+            "min_level_weight=%.4f reference_level=%.4f denom=%.4f "
             "(weight range %.4f..%.4f over %d channels)",
-            pressure, upweights, min(weights), max(weights), num_channels,
+            pressure, upweights, min_level_weight, reference_level, float(denom),
+            min(weights), max(weights), num_channels,
         )
+        # Greppable per-channel table, grouped by variable then pressure level.
+        groups: dict[str, list[tuple[int | None, int, float]]] = {}
+        for i, name in enumerate(names):
+            m = re.match(r"^([A-Za-z_]+)(\d+)$", name)
+            var = m.group(1) if m else name
+            groups.setdefault(var, []).append((levels[i], i, weights[i]))
+        for var in sorted(groups):
+            for lv, i, w in sorted(groups[var], key=lambda t: (t[0] is None, t[0] or 0)):
+                logging.info(
+                    "LOSS_CHANNEL_WEIGHT | var=%-6s level=%-7s idx=%-3d weight=%.4f",
+                    var, "surface" if lv is None else str(lv), i, w,
+                )
         return weights
 
     def _loss_channel_metadata(self) -> dict[str, Any]:
@@ -2429,6 +2761,9 @@ class Trainer:
                 f"  rollout_loss_weights: {self._rollout_loss_weights_metadata()}",
                 f"  activation_checkpointing: {self.activation_checkpointing}",
                 f"  checkpoint_rollout_steps: {self.checkpoint_rollout_steps}",
+                f"  attention_impl: {self.attention_impl}",
+                f"  edge_projection_cache: {str(bool(self.edge_projection_cache)).lower()}",
+                f"  compile_scope: {self._resolve_compile_scope()}",
                 f"  batch_size: {self.batch_size}",
                 f"  gradient_accumulation_steps: {self.gradient_accumulation_steps}",
                 f"  effective_batch_size: {self.effective_batch_size}",
@@ -2845,6 +3180,8 @@ class Trainer:
         last_pred = None
         initial_state = current
         self._log_train_lead_conditioning_debug_once(rollout_steps)
+        # Inside the caller's autocast context and outside every checkpointed step.
+        self._warm_edge_cache()
         for step in range(rollout_steps):
             lead = step + 1
             gt = target_seq[:, step]
@@ -3123,6 +3460,7 @@ class Trainer:
                 "persistence_metrics": {key: value for key, value in valid_logs.items() if key.startswith("persistence_")},
                 "cuda_peak_allocated_gb": cuda_peak_allocated_gb,
                 "cuda_peak_reserved_gb": cuda_peak_reserved_gb,
+                "median_step_time_sec": train_logs.get("median_step_time_sec"),
                 "batch_size": self.batch_size,
                 "gradient_accumulation_steps": self.gradient_accumulation_steps,
                 "effective_batch_size": self.effective_batch_size,
@@ -3313,6 +3651,15 @@ class Trainer:
                 float(diagnostics_time),
                 float(epoch_time),
             )
+            logging.info(
+                "Perf | attention_impl=%s | edge_projection_cache=%s | compile_scope=%s | "
+                "median_step_time_s=%.4f | peak_memory_allocated_gb=%s",
+                str(getattr(self, "attention_impl", ATTENTION_IMPL_DEFAULT)),
+                str(bool(self.edge_projection_cache)).lower(),
+                self._resolve_compile_scope(),
+                float(train_logs.get("median_step_time_sec", float("nan"))),
+                "n/a" if cuda_peak_allocated_gb is None else f"{float(cuda_peak_allocated_gb):.3f}",
+            )
             if self.log_timing_breakdown:
                 logging.info(
                     "Timing breakdown | data_seconds=%.2f | forward_loss_seconds=%.2f | "
@@ -3425,6 +3772,13 @@ class Trainer:
         log_every_batches = max(1, int(getattr(self, "log_every_batches", 1)))
         processed = 0
         optimizer_steps = 0
+        # Wall-clock between consecutive optimizer steps. One optimizer step is the
+        # unit that stays comparable across (batch 4, accum 3) and (batch 12, accum 1),
+        # since both consume effective_batch_size samples. No explicit CUDA sync: in
+        # steady state the loop can only issue steps as fast as the GPU retires them,
+        # so the median of these deltas is the true per-step period.
+        optimizer_step_times: list[float] = []
+        step_window_start = time.time()
         planned_batches = len(self.train_data_loader)
         if self.max_train_batches is not None:
             planned_batches = min(planned_batches, int(self.max_train_batches))
@@ -3463,29 +3817,36 @@ class Trainer:
                     f"Training target length {target_seq.shape[1]} does not match current rollout S={rollout_steps}"
                 )
             forward_start = time.time()
-            with self._autocast_context():
-                loss, _, lead_losses, loss_components = self._rollout_loss(
-                    inp,
-                    target,
-                    batch_rollout_steps,
-                    metadata=metadata,
-                    return_lead_losses=True,
-                    return_loss_components=True,
-                )
-                backward_loss = loss / float(self.gradient_accumulation_steps)
-            forward_loss_time += time.time() - forward_start
-            backward_start = time.time()
-            if self.gscaler is not None:
-                self.gscaler.scale(backward_loss).backward()
-            else:
-                backward_loss.backward()
-            backward_time += time.time() - backward_start
+            # The scope spans forward AND backward: with checkpoint_rollout_steps on,
+            # each step is recomputed during backward and must see the same cache
+            # state it saw on the way in. It closes before _optimizer_step().
+            with self._edge_cache_scope(warm=False):
+                with self._autocast_context():
+                    loss, _, lead_losses, loss_components = self._rollout_loss(
+                        inp,
+                        target,
+                        batch_rollout_steps,
+                        metadata=metadata,
+                        return_lead_losses=True,
+                        return_loss_components=True,
+                    )
+                    backward_loss = loss / float(self.gradient_accumulation_steps)
+                forward_loss_time += time.time() - forward_start
+                backward_start = time.time()
+                if self.gscaler is not None:
+                    self.gscaler.scale(backward_loss).backward()
+                else:
+                    backward_loss.backward()
+                backward_time += time.time() - backward_start
             should_step = (processed % self.gradient_accumulation_steps == 0) or (processed == planned_batches)
             if should_step:
                 optimizer_start = time.time()
                 self._optimizer_step()
                 optimizer_time += time.time() - optimizer_start
                 optimizer_steps += 1
+                step_window_end = time.time()
+                optimizer_step_times.append(step_window_end - step_window_start)
+                step_window_start = step_window_end
             loss_detached = loss.detach().float()
             grid_detached = loss_components["grid_loss"].detach().float()
             spectral_raw_detached = loss_components["spectral_raw_loss"].detach().float()
@@ -3823,6 +4184,11 @@ class Trainer:
             "loss_time_sec": float(forward_loss_time),
             "backward_time_sec": float(backward_time),
             "optimizer_time_sec": float(optimizer_time),
+            "median_step_time_sec": (
+                float(sorted(optimizer_step_times)[len(optimizer_step_times) // 2])
+                if optimizer_step_times
+                else float("nan")
+            ),
             "stage_index": float(stage_info.get("stage_index", float("nan"))),
             "stage_epoch": float(stage_info.get("stage_epoch", float("nan"))),
             "lr_start": float(lr_start),
@@ -3876,18 +4242,18 @@ class Trainer:
         self.optimizer.zero_grad(set_to_none=True)
 
     def _ema_update(self) -> None:
-        if not self.ema_enabled:
+        if not bool(getattr(self, "ema_enabled", False)):
             return
         with torch.no_grad():
-            if self._ema_state is None:
+            if getattr(self, "_ema_state", None) is None:
                 self._ema_state = {
                     name: param.detach().clone().float()
-                    for name, param in self.model.named_parameters()
+                    for name, param in self._canonical_named_parameters()
                     if param.requires_grad
                 }
                 return
             decay = self.ema_decay
-            for name, param in self.model.named_parameters():
+            for name, param in self._canonical_named_parameters():
                 if not param.requires_grad:
                     continue
                 shadow = self._ema_state.get(name)
@@ -3898,11 +4264,15 @@ class Trainer:
 
     def _ema_swap_in(self) -> None:
         """Load EMA weights into the model; live weights are parked until _ema_swap_out."""
-        if not self.ema_enabled or self._ema_state is None or self._ema_backup is not None:
+        if (
+            not bool(getattr(self, "ema_enabled", False))
+            or getattr(self, "_ema_state", None) is None
+            or getattr(self, "_ema_backup", None) is not None
+        ):
             return
         with torch.no_grad():
             backup: dict[str, torch.Tensor] = {}
-            for name, param in self.model.named_parameters():
+            for name, param in self._canonical_named_parameters():
                 shadow = self._ema_state.get(name)
                 if shadow is None:
                     continue
@@ -3911,10 +4281,10 @@ class Trainer:
             self._ema_backup = backup
 
     def _ema_swap_out(self) -> None:
-        if self._ema_backup is None:
+        if getattr(self, "_ema_backup", None) is None:
             return
         with torch.no_grad():
-            for name, param in self.model.named_parameters():
+            for name, param in self._canonical_named_parameters():
                 live = self._ema_backup.get(name)
                 if live is not None:
                     param.copy_(live)
@@ -4012,6 +4382,7 @@ class Trainer:
             "train_time_sec",
             "valid_time_sec",
             "diagnostics_time_sec",
+            "median_step_time_sec",
             "data_time_sec",
             "forward_loss_time_sec",
             "loss_time_sec",
@@ -4067,6 +4438,7 @@ class Trainer:
                 "train_time_sec": float(train_logs.get("train_time_sec", 0.0)),
                 "valid_time_sec": float(valid_logs.get("valid_time_sec", 0.0)),
                 "diagnostics_time_sec": float(self._last_epoch_metadata.get("diagnostics_time_sec", 0.0)),
+                "median_step_time_sec": float(train_logs.get("median_step_time_sec", float("nan"))),
                 "data_time_sec": float(train_logs.get("data_time_sec", 0.0)),
                 "forward_loss_time_sec": float(train_logs.get("forward_loss_time_sec", 0.0)),
                 "loss_time_sec": float(train_logs.get("loss_time_sec", train_logs.get("forward_loss_time_sec", 0.0))),
@@ -4231,7 +4603,7 @@ class Trainer:
             if self.max_valid_batches is not None and batch_idx >= self.max_valid_batches:
                 break
             inp, target, metadata = self._to_device_batch(data)
-            with self._autocast_context():
+            with self._autocast_context(), self._edge_cache_scope(warm=False):
                 loss, _ = self._rollout_loss(
                     inp,
                     target,
@@ -4246,7 +4618,7 @@ class Trainer:
             initial_state = current
             final_pred = None
             self._log_validation_lead_conditioning_debug_once(final_step + 1)
-            with self._autocast_context():
+            with self._autocast_context(), self._edge_cache_scope():
                 for step in range(final_step + 1):
                     lead = step + 1
                     target_seq = self._target_sequence(target)
@@ -4309,7 +4681,7 @@ class Trainer:
             initial_state = current
             persistence_pred = current[:, : self.model.output_channels]
             self._log_validation_lead_conditioning_debug_once(max_eval_steps)
-            with self._autocast_context():
+            with self._autocast_context(), self._edge_cache_scope():
                 for step in range(max_eval_steps):
                     lead = step + 1
                     gt = target_seq[:, step]
@@ -4474,7 +4846,7 @@ class Trainer:
             "best_score_global": self.best_score_global,
             "best_score_by_stage": dict(self.best_score_by_stage),
         }
-        if self.ema_enabled and self._ema_state is not None:
+        if bool(getattr(self, "ema_enabled", False)) and getattr(self, "_ema_state", None) is not None:
             payload["ema"] = {"enabled": True, "decay": float(self.ema_decay)}
             if self._ema_backup is not None:
                 # model_state currently holds the EMA weights (saved inside the swap
@@ -4524,6 +4896,7 @@ class Trainer:
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         checkpoint_metadata = dict(checkpoint.get("metadata", {}))
         self._validate_checkpoint_resolution(checkpoint_metadata)
+        validate_checkpoint_graph_mode(checkpoint_metadata, self.params)
         try:
             validate_checkpoint_architecture(checkpoint_metadata, self.params)
             self._validate_checkpoint_training_rollout(checkpoint_metadata)
@@ -4573,8 +4946,10 @@ class Trainer:
         self._load_model_state(checkpoint["model_state"], strict_delta_stats=self.use_delta_normalization)
         if "optimizer_state_dict" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        if self.ema_enabled:
-            param_names = {name for name, param in self.model.named_parameters() if param.requires_grad}
+        if bool(getattr(self, "ema_enabled", False)):
+            param_names = {
+                name for name, param in self._canonical_named_parameters() if param.requires_grad
+            }
             ema_live_state = checkpoint.get("ema_live_model_state")
             ema_state = checkpoint.get("ema_state")
             if ema_live_state is not None:
@@ -4650,6 +5025,7 @@ class Trainer:
             raise RuntimeError(f"init_from_checkpoint file {checkpoint_path} has no 'model_state'.")
         checkpoint_metadata = dict(checkpoint.get("metadata", {}))
         self._validate_checkpoint_resolution(checkpoint_metadata)
+        validate_checkpoint_graph_mode(checkpoint_metadata, self.params)
         allow_partial = bool(_get(self.params, "init_from_checkpoint_allow_partial", False))
         strict = bool(_get(self.params, "init_from_checkpoint_strict", True)) and not allow_partial
         if strict:

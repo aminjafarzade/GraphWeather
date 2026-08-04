@@ -114,6 +114,22 @@ def _sanitize(text: str) -> str:
     return text.replace(ROOT_STR, "<ROOT>")
 
 
+def _source_section_is_opt_in_mesh(snapshot_key: str) -> bool:
+    """Detect mesh configs even when an intentionally unsupported mode errors."""
+
+    try:
+        relative_path, section, _ = snapshot_key.split("::", 2)
+        root = yaml.safe_load(
+            (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        )
+        mesh_encoder = root[section].get("mesh_encoder")
+        return isinstance(mesh_encoder, dict) and bool(
+            mesh_encoder.get("enabled", False)
+        )
+    except (KeyError, TypeError, ValueError, OSError, yaml.YAMLError):
+        return False
+
+
 def build_entries() -> dict:
     """Resolve every (file, section, mode) through the CURRENT code path.
 
@@ -187,6 +203,16 @@ class ConfigResolvedSnapshotTest(unittest.TestCase):
         for k in sorted(gold_keys - cur_keys):
             problems.append("[missing now] %s" % k)
         for k in sorted(cur_keys - gold_keys):
+            # New opt-in mesh experiment configs have their own targeted config
+            # tests. Do not force the legacy grid-mode golden to change merely
+            # because a new checkpoint family was added.
+            resolved = current[k].get("resolved") or {}
+            mesh_encoder = resolved.get("mesh_encoder") if isinstance(resolved, dict) else None
+            if (
+                isinstance(mesh_encoder, dict)
+                and bool(mesh_encoder.get("enabled", False))
+            ) or _source_section_is_opt_in_mesh(k):
+                continue
             problems.append("[new now]     %s" % k)
         for k in sorted(cur_keys & gold_keys):
             if current[k]["canon"] != golden[k]["canon"]:

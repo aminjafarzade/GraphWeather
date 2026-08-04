@@ -29,7 +29,7 @@ default: &DEFAULT
   nettype: "graph_weather"
   target: "default"
   resolution: 5.625
-  graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625_k8_hybrid_row_aware_v2.pt"
+  graph_path: "graphs/graph_5p625_k8_hybrid_row_aware_v2.pt"
   auto_build_graph: true
   hidden_dim: 96
   edge_dim: 6
@@ -88,12 +88,12 @@ default: &DEFAULT
     exclude_loss_variables: ["orog"]
     known_future_variables: []
 
-  train_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/train"
-  valid_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/valid"
-  test_dataset_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/test"
-  global_means_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy"
-  global_stds_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy"
-  exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
+  train_data_path: "/home/amin/KAI_5/kai_data_5p625/train"
+  valid_data_path: "/home/amin/KAI_5/kai_data_5p625/valid"
+  test_dataset_path: "/home/amin/KAI_5/kai_data_5p625/test"
+  global_means_path: "/home/amin/KAI_5/kai_data_5p625/stats/global_mean.npy"
+  global_stds_path: "/home/amin/KAI_5/kai_data_5p625/stats/global_std.npy"
+  exp_dir: "runs"
 
   # Standalone evaluation. Override eval_checkpoint_path from the CLI unless
   # you want to hard-code a specific checkpoint here.

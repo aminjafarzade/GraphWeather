@@ -6,9 +6,21 @@ import torch
 from torch import nn
 
 from .architecture import resolve_graph_architecture
-from .graph_bundle import GraphBundle
+from .graph_bundle import GraphBundle, GraphLevel
 from .layers import LocalGraphAttentionBlock, NodewiseRefineMLP
 from .pooling import MeanMaxPool, ParentUnpoolFuse
+
+
+def _diag_name(collector: object | None, name: str) -> str | None:
+    """The name only matters when a collector will read it.
+
+    LocalGraphAttention uses ``diagnostics_name`` solely inside its
+    ``diagnostics_collector is not None`` branch, so with diagnostics off the string
+    is dead. Passing a distinct one per block anyway makes torch.compile specialize
+    ``LocalGraphAttentionBlock.forward`` once per block, and 11 blocks against the
+    default ``recompile_limit`` of 8 tips that frame back into eager.
+    """
+    return name if collector is not None else None
 
 
 class GraphUNetProcessor(nn.Module):
@@ -32,9 +44,13 @@ class GraphUNetProcessor(nn.Module):
         skip_fusion: dict | None = None,
         pooling: dict | None = None,
         l0_refine: dict | None = None,
+        edge_encoding: dict | None = None,
+        attention_impl: str | None = None,
     ):
         super().__init__()
         self.graph = graph
+        self.edge_encoding = dict(edge_encoding or {})
+        self.attention_impl = attention_impl
         derived_use_l3 = bool(use_l3) or int(num_graph_levels) >= 4
         arch = resolve_graph_architecture(
             {
@@ -76,43 +92,43 @@ class GraphUNetProcessor(nn.Module):
             if getattr(graph, "L4", None) is None or getattr(graph, "pool_L3_to_L4", None) is None:
                 raise ValueError("L4 processor path requested, but the graph bundle has no L4 level/pool map.")
         self.l0_blocks = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads) for _ in range(arch.l0_blocks)]
+            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l0_blocks)]
         )
         self.pool01 = MeanMaxPool(dim, pooling=self.pooling, name="l0_to_l1")
         self.l1_blocks = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads) for _ in range(arch.l1_blocks)]
+            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l1_blocks)]
         )
         self.pool12 = MeanMaxPool(dim, pooling=self.pooling, name="l1_to_l2")
         self.l2_blocks = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads) for _ in range(arch.l2_blocks)]
+            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l2_blocks)]
         )
         if self.use_l3:
             self.pool23 = MeanMaxPool(dim, pooling=self.pooling, name="l2_to_l3")
             self.l3_blocks = nn.ModuleList(
-                [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads) for _ in range(arch.l3_blocks)]
+                [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l3_blocks)]
             )
             if self.use_l4:
                 self.pool34 = MeanMaxPool(dim, pooling=self.pooling, name="l3_to_l4")
                 self.l4_blocks = nn.ModuleList(
-                    [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads) for _ in range(arch.l4_blocks)]
+                    [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l4_blocks)]
                 )
                 self.unpool43 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l4_to_l3")
                 self.l3_refine_after_l4 = nn.ModuleList(
                     [
-                        LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads)
+                        LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl)
                         for _ in range(arch.l3_refine_after_l4_blocks)
                     ]
                 )
             self.unpool32 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l3_to_l2")
             self.l2_refine_after_l3 = nn.ModuleList(
                 [
-                    LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads)
+                    LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl)
                     for _ in range(arch.l2_refine_after_l3_blocks)
                 ]
             )
         self.unpool21 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l2_to_l1")
         self.l1_refine = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads) for _ in range(arch.l1_refine_blocks)]
+            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l1_refine_blocks)]
         )
         self.unpool10 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l1_to_l0")
         self.l0_refine = nn.ModuleList(
@@ -123,6 +139,8 @@ class GraphUNetProcessor(nn.Module):
                     edge_dim=edge_dim,
                     heads=heads,
                     config=self.l0_refine_config,
+                    edge_encoding=self.edge_encoding,
+                    attention_impl=self.attention_impl,
                 )
                 for idx in range(arch.l0_refine_blocks)
             ]
@@ -145,6 +163,8 @@ class GraphUNetProcessor(nn.Module):
         edge_dim: int,
         heads: int,
         config: dict,
+        edge_encoding: dict | None = None,
+        attention_impl: str | None = None,
     ) -> nn.Module:
         # The ablation intentionally replaces only processor/l0_refine.0.
         if idx == 0 and str(config.get("type", "attention")).strip().lower() == "nodewise_mlp":
@@ -155,7 +175,32 @@ class GraphUNetProcessor(nn.Module):
                 residual_scale_init=float(config.get("residual_scale_init", 0.1)),
                 learnable_residual_scale=bool(config.get("learnable_residual_scale", True)),
             )
-        return LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads)
+        return LocalGraphAttentionBlock(
+            dim, edge_dim=edge_dim, heads=heads, edge_encoding=edge_encoding,
+            attention_impl=attention_impl,
+        )
+
+    def edge_cache_levels(self) -> list[tuple[GraphLevel, nn.ModuleList]]:
+        """``(graph level, block list)`` pairs in forward order.
+
+        The single source of truth for which graph each processor block attends
+        over, so ``GraphWeatherModel.warm_edge_cache()`` never has to infer it.
+        Mirrors ``forward`` exactly; keep the two in step.
+        """
+        pairs: list[tuple[GraphLevel, nn.ModuleList]] = [
+            (self.graph.L0, self.l0_blocks),
+            (self.graph.L1, self.l1_blocks),
+            (self.graph.L2, self.l2_blocks),
+        ]
+        if self.use_l3:
+            pairs.append((self.graph.L3, self.l3_blocks))
+            if self.use_l4:
+                pairs.append((self.graph.L4, self.l4_blocks))
+                pairs.append((self.graph.L3, self.l3_refine_after_l4))
+            pairs.append((self.graph.L2, self.l2_refine_after_l3))
+        pairs.append((self.graph.L1, self.l1_refine))
+        pairs.append((self.graph.L0, self.l0_refine))
+        return pairs
 
     def _pool_weights(self, level_name: str) -> torch.Tensor | None:
         if str(self.pooling.get("mean_type", "mean")).lower() != "area_weighted":
@@ -175,7 +220,7 @@ class GraphUNetProcessor(nn.Module):
                 h0,
                 self.graph.L0,
                 diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"processor/l0_blocks.{idx}",
+                diagnostics_name=_diag_name(diagnostics_collector, f"processor/l0_blocks.{idx}"),
             )
             self._add_diag(diagnostics_collector, f"processor/l0_blocks.{idx}", h0)
         skip0 = h0
@@ -187,7 +232,7 @@ class GraphUNetProcessor(nn.Module):
                 h1,
                 self.graph.L1,
                 diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"processor/l1_blocks.{idx}",
+                diagnostics_name=_diag_name(diagnostics_collector, f"processor/l1_blocks.{idx}"),
             )
             self._add_diag(diagnostics_collector, f"processor/l1_blocks.{idx}", h1)
         skip1 = h1
@@ -199,7 +244,7 @@ class GraphUNetProcessor(nn.Module):
                 h2,
                 self.graph.L2,
                 diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"processor/l2_blocks.{idx}",
+                diagnostics_name=_diag_name(diagnostics_collector, f"processor/l2_blocks.{idx}"),
             )
             self._add_diag(diagnostics_collector, f"processor/l2_blocks.{idx}", h2)
 
@@ -212,7 +257,7 @@ class GraphUNetProcessor(nn.Module):
                     h3,
                     self.graph.L3,
                     diagnostics_collector=diagnostics_collector,
-                    diagnostics_name=f"processor/l3_blocks.{idx}",
+                    diagnostics_name=_diag_name(diagnostics_collector, f"processor/l3_blocks.{idx}"),
                 )
                 self._add_diag(diagnostics_collector, f"processor/l3_blocks.{idx}", h3)
             if self.use_l4:
@@ -224,7 +269,7 @@ class GraphUNetProcessor(nn.Module):
                         h4,
                         self.graph.L4,
                         diagnostics_collector=diagnostics_collector,
-                        diagnostics_name=f"processor/l4_blocks.{idx}",
+                        diagnostics_name=_diag_name(diagnostics_collector, f"processor/l4_blocks.{idx}"),
                     )
                     self._add_diag(diagnostics_collector, f"processor/l4_blocks.{idx}", h4)
                 h3 = self.unpool43(h4, self.graph.pool_L3_to_L4, skip3)
@@ -234,7 +279,7 @@ class GraphUNetProcessor(nn.Module):
                         h3,
                         self.graph.L3,
                         diagnostics_collector=diagnostics_collector,
-                        diagnostics_name=f"processor/l3_refine_after_l4.{idx}",
+                        diagnostics_name=_diag_name(diagnostics_collector, f"processor/l3_refine_after_l4.{idx}"),
                     )
                     self._add_diag(diagnostics_collector, f"processor/l3_refine_after_l4.{idx}", h3)
             h2 = self.unpool32(h3, self.graph.pool_L2_to_L3, skip2)
@@ -244,7 +289,7 @@ class GraphUNetProcessor(nn.Module):
                     h2,
                     self.graph.L2,
                     diagnostics_collector=diagnostics_collector,
-                    diagnostics_name=f"processor/l2_refine_after_l3.{idx}",
+                    diagnostics_name=_diag_name(diagnostics_collector, f"processor/l2_refine_after_l3.{idx}"),
                 )
                 self._add_diag(diagnostics_collector, f"processor/l2_refine_after_l3.{idx}", h2)
 
@@ -255,7 +300,7 @@ class GraphUNetProcessor(nn.Module):
                 h1,
                 self.graph.L1,
                 diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"processor/l1_refine.{idx}",
+                diagnostics_name=_diag_name(diagnostics_collector, f"processor/l1_refine.{idx}"),
             )
             self._add_diag(diagnostics_collector, f"processor/l1_refine.{idx}", h1)
 
@@ -266,7 +311,7 @@ class GraphUNetProcessor(nn.Module):
                 h0,
                 self.graph.L0,
                 diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"processor/l0_refine.{idx}",
+                diagnostics_name=_diag_name(diagnostics_collector, f"processor/l0_refine.{idx}"),
             )
             self._add_diag(diagnostics_collector, f"processor/l0_refine.{idx}", h0)
         self._add_diag(diagnostics_collector, "processor/output", h0)

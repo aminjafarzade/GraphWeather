@@ -124,7 +124,7 @@ default: &DEFAULT
   variable_metadata:
     path: null
 
-  exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
+  exp_dir: "runs"
   eval_checkpoint_path: null
   eval_output_dir: null
   eval_forecast_steps: [10]
@@ -159,12 +159,12 @@ default: &DEFAULT
         - [32, 64]
         - [16, 32]
         - [8, 16]
-      train_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/train"
-      valid_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/valid"
-      test_dataset_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/test"
-      graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625_k8_hybrid_row_aware_v2.pt"
-      global_means_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy"
-      global_stds_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy"
+      train_data_path: "/home/amin/KAI_5/kai_data_5p625/train"
+      valid_data_path: "/home/amin/KAI_5/kai_data_5p625/valid"
+      test_dataset_path: "/home/amin/KAI_5/kai_data_5p625/test"
+      graph_path: "graphs/graph_5p625_k8_hybrid_row_aware_v2.pt"
+      global_means_path: "/home/amin/KAI_5/kai_data_5p625/stats/global_mean.npy"
+      global_stds_path: "/home/amin/KAI_5/kai_data_5p625/stats/global_std.npy"
       delta_stats_path: "data/stats/5p625_delta_stats.npz"
       batch_size: 12
       gradient_accumulation_steps: 1
@@ -177,12 +177,12 @@ default: &DEFAULT
         - [72, 144]
         - [36, 72]
         - [18, 36]
-      train_data_path: "/lustre/home/ziya/KAI_5/era5_67/train"
-      valid_data_path: "/lustre/home/ziya/KAI_5/era5_67/val"
-      test_dataset_path: "/lustre/home/ziya/KAI_5/era5_67/test"
-      graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_2p5_k8_hybrid_row_aware_v2.pt"
-      global_means_path: "/lustre/home/ziya/KAI_5/era5_67/stats/global_mean.npy"
-      global_stds_path: "/lustre/home/ziya/KAI_5/era5_67/stats/global_std.npy"
+      train_data_path: "/home/amin/KAI_5/era5_67/train"
+      valid_data_path: "/home/amin/KAI_5/era5_67/val"
+      test_dataset_path: "/home/amin/KAI_5/era5_67/test"
+      graph_path: "graphs/graph_2p5_k8_hybrid_row_aware_v2.pt"
+      global_means_path: "/home/amin/KAI_5/era5_67/stats/global_mean.npy"
+      global_stds_path: "/home/amin/KAI_5/era5_67/stats/global_std.npy"
       delta_stats_path: "data/stats/era5_67_2p5_delta_stats.npz"
       batch_size: 4
       gradient_accumulation_steps: 3
@@ -257,12 +257,12 @@ raw_l3:
         - [16, 32]
         - [8, 16]
         - [4, 8]
-      train_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/train"
-      valid_data_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/valid"
-      test_dataset_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/test"
-      graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_5p625_k8_hybrid_row_aware_L3_v3.pt"
-      global_means_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_mean.npy"
-      global_stds_path: "/lustre/home/ziya/KAI_5/kai_data_5p625/stats/global_std.npy"
+      train_data_path: "/home/amin/KAI_5/kai_data_5p625/train"
+      valid_data_path: "/home/amin/KAI_5/kai_data_5p625/valid"
+      test_dataset_path: "/home/amin/KAI_5/kai_data_5p625/test"
+      graph_path: "graphs/graph_5p625_k8_hybrid_row_aware_L3_v3.pt"
+      global_means_path: "/home/amin/KAI_5/kai_data_5p625/stats/global_mean.npy"
+      global_stds_path: "/home/amin/KAI_5/kai_data_5p625/stats/global_std.npy"
       delta_stats_path: "data/stats/5p625_delta_stats.npz"
       batch_size: 12
       gradient_accumulation_steps: 1
@@ -275,12 +275,12 @@ raw_l3:
         - [36, 72]
         - [18, 36]
         - [9, 18]
-      train_data_path: "/lustre/home/ziya/KAI_5/era5_67/train"
-      valid_data_path: "/lustre/home/ziya/KAI_5/era5_67/val"
-      test_dataset_path: "/lustre/home/ziya/KAI_5/era5_67/test"
-      graph_path: "/lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_2p5_k8_hybrid_row_aware_L3_v3.pt"
-      global_means_path: "/lustre/home/ziya/KAI_5/era5_67/stats/global_mean.npy"
-      global_stds_path: "/lustre/home/ziya/KAI_5/era5_67/stats/global_std.npy"
+      train_data_path: "/home/amin/KAI_5/era5_67/train"
+      valid_data_path: "/home/amin/KAI_5/era5_67/val"
+      test_dataset_path: "/home/amin/KAI_5/era5_67/test"
+      graph_path: "graphs/graph_2p5_k8_hybrid_row_aware_L3_v3.pt"
+      global_means_path: "/home/amin/KAI_5/era5_67/stats/global_mean.npy"
+      global_stds_path: "/home/amin/KAI_5/era5_67/stats/global_std.npy"
       delta_stats_path: "data/stats/era5_67_2p5_delta_stats.npz"
       batch_size: 4
       gradient_accumulation_steps: 3

@@ -23,6 +23,10 @@ MODEL_CONFIG_KEYS = {
     "pooling",
     "l0_refine",
     "lead_conditioning",
+    "mesh_encoder",
+    "edge_encoding",
+    "boundary_mlp",
+    "head_init_std",
     "encoder_blocks",
     "decoder_blocks",
     "l0_blocks",
@@ -39,12 +43,28 @@ MODEL_CONFIG_KEYS = {
     "l1_refine_after_l2_blocks",
 }
 
-SUPPORTED_SKIP_FUSION_TYPES = {"default", "scalar_gated"}
+SUPPORTED_SKIP_FUSION_TYPES = {"default", "scalar_gated", "sum"}
 SUPPORTED_POOLING_TYPES = {"default", "parent_index_meanmax", "scalar_gated_meanmax"}
 SUPPORTED_POOLING_MEAN_TYPES = {"mean", "area_weighted"}
 SUPPORTED_L0_REFINE_TYPES = {"attention", "nodewise_mlp"}
 SUPPORTED_LEAD_CONDITIONING_TYPES = {"sincos_concat"}
 SUPPORTED_HIERARCHY_TYPES = {"standard", "ratio15_l4", "l4_72_36_24_18_9"}
+SUPPORTED_BIPARTITE_AGGREGATIONS = {"sum", "mean"}
+SUPPORTED_MESH_BOUNDARY_TYPES = {"legacy", "graphcast_mlp", "fixed_spherical"}
+SUPPORTED_MESH_COARSE_CONNECTIVITY = {"native_icosphere", "full_m1"}
+MESH_ENCODER_KEYS = {
+    "enabled",
+    "refinement",
+    "g2m_radius_factor",
+    "mlp_hidden_ratio",
+    "aggregation",
+    "boundary_type",
+    "grid_skip_mlp",
+    "grid_attention_encoder_blocks",
+    "grid_attention_decoder_blocks",
+    "grid_attention_k_neighbors",
+    "coarse_level_connectivity",
+}
 
 
 @dataclass(frozen=True)
@@ -95,6 +115,36 @@ class LeadConditioningConfig:
             "type": self.type,
             "max_lead": int(self.max_lead),
             "added_input_channels": int(self.added_input_channels),
+        }
+
+
+@dataclass(frozen=True)
+class MeshEncoderConfig:
+    enabled: bool = False
+    refinement: int = 5
+    g2m_radius_factor: float = 0.6
+    mlp_hidden_ratio: int = 2
+    aggregation: str = "sum"
+    boundary_type: str = "legacy"
+    grid_skip_mlp: bool = False
+    grid_attention_encoder_blocks: int = 0
+    grid_attention_decoder_blocks: int = 0
+    grid_attention_k_neighbors: int = 8
+    coarse_level_connectivity: str = "native_icosphere"
+
+    def asdict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "refinement": int(self.refinement),
+            "g2m_radius_factor": float(self.g2m_radius_factor),
+            "mlp_hidden_ratio": int(self.mlp_hidden_ratio),
+            "aggregation": self.aggregation,
+            "boundary_type": self.boundary_type,
+            "grid_skip_mlp": bool(self.grid_skip_mlp),
+            "grid_attention_encoder_blocks": int(self.grid_attention_encoder_blocks),
+            "grid_attention_decoder_blocks": int(self.grid_attention_decoder_blocks),
+            "grid_attention_k_neighbors": int(self.grid_attention_k_neighbors),
+            "coarse_level_connectivity": self.coarse_level_connectivity,
         }
 
 
@@ -198,6 +248,13 @@ def _positive_int(value: Any, name: str) -> int:
     ivalue = int(value)
     if ivalue < 1:
         raise ValueError(f"{name} must be >= 1, got {ivalue}.")
+    return ivalue
+
+
+def _non_negative_int(value: Any, name: str) -> int:
+    ivalue = int(value)
+    if ivalue < 0:
+        raise ValueError(f"{name} must be >= 0, got {ivalue}.")
     return ivalue
 
 
@@ -371,6 +428,107 @@ def resolve_lead_conditioning(source: Any | None = None) -> LeadConditioningConf
     return LeadConditioningConfig(enabled=True, type=conditioning_type, max_lead=max_lead)
 
 
+def resolve_mesh_encoder(source: Any | None = None) -> MeshEncoderConfig:
+    """Resolve the optional GraphCast-style grid<->icosphere domain crossing.
+
+    Absence is equivalent to ``enabled: false``. Callers that serialize resolved
+    configs should only emit this block when it was explicitly configured, which
+    keeps legacy resolved configs byte-for-byte unchanged.
+    """
+
+    settings = _extract_settings(source or {})
+    raw = settings.get("mesh_encoder", None)
+    if raw is None:
+        raw_dict: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        raw_dict = dict(raw)
+    else:
+        raise ValueError("mesh_encoder must be a mapping or null.")
+    unknown = sorted(set(raw_dict) - MESH_ENCODER_KEYS)
+    if unknown:
+        raise ValueError(f"Unsupported mesh_encoder keys: {unknown}. Expected: {sorted(MESH_ENCODER_KEYS)}.")
+    aggregation = str(raw_dict.get("aggregation", "sum")).strip().lower()
+    if aggregation not in SUPPORTED_BIPARTITE_AGGREGATIONS:
+        available = ", ".join(sorted(SUPPORTED_BIPARTITE_AGGREGATIONS))
+        raise ValueError(
+            f"Unsupported mesh_encoder.aggregation={aggregation!r}. Expected one of: {available}."
+        )
+    boundary_type = str(raw_dict.get("boundary_type", "legacy")).strip().lower()
+    if boundary_type not in SUPPORTED_MESH_BOUNDARY_TYPES:
+        available = ", ".join(sorted(SUPPORTED_MESH_BOUNDARY_TYPES))
+        raise ValueError(
+            f"Unsupported mesh_encoder.boundary_type={boundary_type!r}. Expected one of: {available}."
+        )
+    enabled = _to_bool(raw_dict.get("enabled", False), "mesh_encoder.enabled")
+    grid_skip_mlp = _to_bool(
+        raw_dict.get("grid_skip_mlp", False),
+        "mesh_encoder.grid_skip_mlp",
+    )
+    grid_attention_encoder_blocks = _non_negative_int(
+        raw_dict.get("grid_attention_encoder_blocks", 0),
+        "mesh_encoder.grid_attention_encoder_blocks",
+    )
+    grid_attention_decoder_blocks = _non_negative_int(
+        raw_dict.get("grid_attention_decoder_blocks", 0),
+        "mesh_encoder.grid_attention_decoder_blocks",
+    )
+    grid_attention_k_neighbors = _positive_int(
+        raw_dict.get("grid_attention_k_neighbors", 8),
+        "mesh_encoder.grid_attention_k_neighbors",
+    )
+    if grid_skip_mlp and not enabled:
+        raise ValueError("mesh_encoder.grid_skip_mlp=true requires mesh_encoder.enabled=true.")
+    if grid_skip_mlp and boundary_type != "graphcast_mlp":
+        raise ValueError(
+            "mesh_encoder.grid_skip_mlp=true requires "
+            "mesh_encoder.boundary_type='graphcast_mlp'."
+        )
+    if (grid_attention_encoder_blocks or grid_attention_decoder_blocks) and not enabled:
+        raise ValueError(
+            "mesh_encoder grid-attention blocks require mesh_encoder.enabled=true."
+        )
+    if boundary_type == "fixed_spherical" and grid_skip_mlp:
+        raise ValueError(
+            "mesh_encoder.boundary_type='fixed_spherical' is parameter-free and "
+            "does not support grid_skip_mlp."
+        )
+    if boundary_type == "fixed_spherical" and (
+        grid_attention_encoder_blocks or grid_attention_decoder_blocks
+    ):
+        raise ValueError(
+            "mesh_encoder.boundary_type='fixed_spherical' maps raw channels "
+            "directly to/from the mesh and does not support grid-attention blocks."
+        )
+    coarse_level_connectivity = str(
+        raw_dict.get("coarse_level_connectivity", "native_icosphere")
+    ).strip().lower()
+    if coarse_level_connectivity not in SUPPORTED_MESH_COARSE_CONNECTIVITY:
+        available = ", ".join(sorted(SUPPORTED_MESH_COARSE_CONNECTIVITY))
+        raise ValueError(
+            "Unsupported mesh_encoder.coarse_level_connectivity="
+            f"{coarse_level_connectivity!r}. Expected one of: {available}."
+        )
+    return MeshEncoderConfig(
+        enabled=enabled,
+        refinement=_positive_int(raw_dict.get("refinement", 5), "mesh_encoder.refinement"),
+        g2m_radius_factor=_positive_float(
+            raw_dict.get("g2m_radius_factor", 0.6),
+            "mesh_encoder.g2m_radius_factor",
+        ),
+        mlp_hidden_ratio=_positive_int(
+            raw_dict.get("mlp_hidden_ratio", 2),
+            "mesh_encoder.mlp_hidden_ratio",
+        ),
+        aggregation=aggregation,
+        boundary_type=boundary_type,
+        grid_skip_mlp=grid_skip_mlp,
+        grid_attention_encoder_blocks=grid_attention_encoder_blocks,
+        grid_attention_decoder_blocks=grid_attention_decoder_blocks,
+        grid_attention_k_neighbors=grid_attention_k_neighbors,
+        coarse_level_connectivity=coarse_level_connectivity,
+    )
+
+
 def resolve_l0_refine(source: Any | None = None) -> L0RefineConfig:
     raw_dict = _raw_type_or_dict(source, "l0_refine")
 
@@ -535,6 +693,9 @@ def normalize_model_config_dict(params: dict[str, Any]) -> dict[str, Any]:
 
     resolved = dict(params)
     model = resolved.get("model", None)
+    has_mesh_encoder = "mesh_encoder" in resolved or (
+        isinstance(model, dict) and "mesh_encoder" in model
+    )
     if isinstance(model, dict):
         for key, value in model.items():
             if key not in MODEL_CONFIG_KEYS:
@@ -548,6 +709,37 @@ def normalize_model_config_dict(params: dict[str, Any]) -> dict[str, Any]:
     resolved.update(arch.asdict())
     model_dict = dict(model or {})
     model_dict.update(arch.asdict())
+    if has_mesh_encoder:
+        mesh_encoder = resolve_mesh_encoder(resolved).asdict()
+        resolved["mesh_encoder"] = mesh_encoder
+        model_dict["mesh_encoder"] = dict(mesh_encoder)
+        if bool(mesh_encoder["enabled"]):
+            refinement = int(mesh_encoder["refinement"])
+            levels = int(arch.num_graph_levels)
+            if refinement < levels - 1:
+                raise ValueError(
+                    f"mesh_encoder.refinement={refinement} is too small for "
+                    f"num_graph_levels={levels}; expected at least {levels - 1}."
+                )
+            mesh_node_counts = [10 * (4 ** (refinement - idx)) + 2 for idx in range(levels)]
+            level_k_neighbors = [6] * levels
+            if mesh_encoder["coarse_level_connectivity"] == "full_m1":
+                coarsest_refinement = refinement - (levels - 1)
+                if coarsest_refinement != 1:
+                    raise ValueError(
+                        "mesh_encoder.coarse_level_connectivity='full_m1' requires "
+                        f"the coarsest level to be M1, got M{coarsest_refinement} "
+                        f"(refinement={refinement}, num_graph_levels={levels})."
+                    )
+                level_k_neighbors[-1] = mesh_node_counts[-1] - 1
+            resolved["node_counts"] = mesh_node_counts
+            resolved["level_k_neighbors"] = level_k_neighbors
+            model_dict["level_k_neighbors"] = list(level_k_neighbors)
+            resolved["edge_counts"] = [
+                count * level_k
+                for count, level_k in zip(mesh_node_counts, level_k_neighbors)
+            ]
+            resolved["mesh_format_version"] = 1
     if arch.lead_conditioning.enabled:
         output_channels = int(resolved.get("output_channels", model_dict.get("output_channels", 67)))
         n_history = int(resolved.get("n_history", 1))
@@ -584,6 +776,19 @@ def architecture_metadata(
         for key in ("level_shapes", "node_counts", "edge_counts"):
             if key in graph_metadata:
                 metadata[key] = graph_metadata[key]
+    mesh_encoder = resolve_mesh_encoder(source)
+    if mesh_encoder.enabled:
+        metadata["graph_mode"] = "mesh"
+        metadata["mesh_encoder"] = mesh_encoder.asdict()
+        if graph_metadata:
+            for key in (
+                "refinement",
+                "g2m_radius_factor",
+                "coarse_level_connectivity",
+                "mesh_format_version",
+            ):
+                if key in graph_metadata:
+                    metadata[key] = graph_metadata[key]
     for key in ("input_channels", "output_channels"):
         value = _get_value(source, key, _MISSING)
         if value is not _MISSING:
@@ -597,6 +802,18 @@ def validate_checkpoint_architecture(
     checkpoint_metadata: dict[str, Any] | None,
     current: Any,
 ) -> None:
+    validate_checkpoint_graph_mode(checkpoint_metadata, current)
+    current_mesh = resolve_mesh_encoder(current)
+    checkpoint_mesh_raw = checkpoint_metadata.get("mesh_encoder", {}) if checkpoint_metadata else {}
+    if current_mesh.enabled:
+        checkpoint_mesh = resolve_mesh_encoder({"mesh_encoder": checkpoint_mesh_raw})
+        if checkpoint_mesh != current_mesh:
+            raise RuntimeError(
+                "Checkpoint architecture mismatch: "
+                f"checkpoint mesh_encoder={checkpoint_mesh.asdict()!r} but current config has "
+                f"mesh_encoder={current_mesh.asdict()!r}. Train from scratch or use explicit partial initialization."
+            )
+
     checkpoint_arch = checkpoint_architecture_metadata(checkpoint_metadata)
     current_arch = resolve_graph_architecture(current)
     if checkpoint_arch != current_arch:
@@ -690,3 +907,26 @@ def validate_checkpoint_architecture(
                 f"Checkpoint output_channels={int(checkpoint_output)}, current output_channels={int(current_output)}. "
                 "Train from scratch or use explicit partial initialization."
             )
+
+
+def validate_checkpoint_graph_mode(
+    checkpoint_metadata: dict[str, Any] | None,
+    current: Any,
+) -> None:
+    """Reject grid↔mesh checkpoint reuse, including partial initialization."""
+
+    current_mesh = resolve_mesh_encoder(current)
+    checkpoint_mesh_raw = checkpoint_metadata.get("mesh_encoder", {}) if checkpoint_metadata else {}
+    checkpoint_mode = str((checkpoint_metadata or {}).get("graph_mode", "grid"))
+    checkpoint_mesh_enabled = bool(
+        isinstance(checkpoint_mesh_raw, dict) and checkpoint_mesh_raw.get("enabled", False)
+    )
+    if checkpoint_mode == "mesh":
+        checkpoint_mesh_enabled = True
+    if bool(current_mesh.enabled) != checkpoint_mesh_enabled:
+        raise RuntimeError(
+            "Checkpoint architecture mismatch: "
+            f"checkpoint graph_mode={'mesh' if checkpoint_mesh_enabled else 'grid'} but current config has "
+            f"graph_mode={'mesh' if current_mesh.enabled else 'grid'}. Grid and mesh modes use separate "
+            "checkpoint families."
+        )

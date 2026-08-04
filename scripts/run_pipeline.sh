@@ -34,7 +34,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 cd "${REPO_ROOT}"
 
 # --- pinned interpreter + caches (overridable) -------------------------------
-PYTHON="${PYTHON:-/lustre/home/ziya/miniconda3/envs/graphweather-cu128/bin/python}"
+PYTHON="${PYTHON:-$HOME/miniconda3/envs/graphweather-cu128/bin/python}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-cache}"
 

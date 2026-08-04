@@ -221,18 +221,18 @@ raw_1p5_l4_hidden160_orog_tisr_fixed:
       pooling_map_strategy: proportional_parent_index
       validate_graph: true
       validate_parent_maps: true
-      train_data_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/train"
-      valid_data_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/val"
-      test_dataset_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/test"
-      global_means_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/stats/global_mean.npy"
-      global_stds_path: "/lustre/home/ziya/KAI_5/era5_67_1p5/stats/global_std.npy"
+      train_data_path: "/home/amin/KAI_5/era5_67_1p5/train"
+      valid_data_path: "/home/amin/KAI_5/era5_67_1p5/val"
+      test_dataset_path: "/home/amin/KAI_5/era5_67_1p5/test"
+      global_means_path: "/home/amin/KAI_5/era5_67_1p5/stats/global_mean.npy"
+      global_stds_path: "/home/amin/KAI_5/era5_67_1p5/stats/global_std.npy"
       delta_stats_path: "data/stats/era5_67_1p5_delta_stats.npz"
       batch_size: 4
       gradient_accumulation_steps: 3
       max_gradient_norm: 0.5
       enable_amp: true
 
-  exp_dir: "/lustre/home/ziya/GNN/GraphWeather5p625/experiments"
+  exp_dir: "runs"
   eval_checkpoint_path: null
   eval_output_dir: null
   eval_forecast_steps: [10]

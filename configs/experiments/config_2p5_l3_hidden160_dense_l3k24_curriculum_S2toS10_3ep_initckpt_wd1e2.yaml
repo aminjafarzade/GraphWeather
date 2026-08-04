@@ -1,0 +1,428 @@
+# hidden-160 twin of the winning initckpt curriculum recipe;
+# warm start from the hidden-160 S1 base. Everything else identical.
+2p5_l3_h160_densel3k24_currS2toS10x3_initckpt_wd1e2:
+  lr: 5.0e-05
+  min_lr: 1.0e-06
+  weight_decay: 1.0e-2
+  scheduler: CosineAnnealingLR
+  max_epochs: 27
+  max_train_batches: null
+  max_valid_batches: null
+  batch_size: 4
+  gradient_accumulation_steps: 3
+  num_data_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  enable_amp: true
+  amp_dtype: auto_bf16_fp16
+  max_gradient_norm: 0.5
+  log_cuda_memory: true
+  experiment_name: 2p5_l3_h160_densel3k24_currS2toS10x3_initckpt_wd1e2
+  run_name: 2p5_l3_h160_densel3k24_currS2toS10x3_initckpt_wd1e2
+  resolution_mode: 2p5
+  nettype: graph_weather
+  target: default
+  auto_build_graph: true
+  hidden_dim: 160
+  edge_dim: 6
+  num_heads: 5
+  k_neighbors: 8
+  level_k_neighbors:
+  - 8
+  - 8
+  - 8
+  - 24
+  graph_connectivity_strategy: hybrid_row_aware_knn
+  row_aware_knn:
+    enabled: true
+    interior_neighbors_from_north_row: 1
+    interior_neighbors_from_south_row: 1
+    polar_neighbors_from_adjacent_row: 2
+  encoder_blocks: 1
+  decoder_blocks: 1
+  skip_fusion:
+    type: default
+    init_scale: 1.0
+    max_scale: 2.0
+  lead_conditioning:
+    enabled: false
+    type: none
+    max_lead: 0
+    added_input_channels: 0
+  model:
+    input_channels: 134
+    output_channels: 67
+    hidden_dim: 160
+    num_heads: 5
+    k_neighbors: 8
+    level_k_neighbors:
+    - 8
+    - 8
+    - 8
+    - 24
+    use_l3: true
+    num_graph_levels: 4
+    l0_blocks: 2
+    l1_blocks: 2
+    l2_blocks: 1
+    l3_blocks: 1
+    l2_refine_after_l3_blocks: 1
+    l1_refine_blocks: 1
+    l0_refine_blocks: 1
+    skip_fusion:
+      type: default
+      init_scale: 1.0
+      max_scale: 2.0
+    lead_conditioning:
+      enabled: false
+      type: none
+      max_lead: 0
+      added_input_channels: 0
+    hierarchy_type: standard
+    use_l4_ratio15: false
+    head_dim: 32
+    pooling:
+      type: default
+      init_scale: 1.0
+      max_scale: 2.0
+      mean_type: mean
+      include_max: true
+    use_l4: false
+    l4_blocks: 1
+    l3_refine_after_l4_blocks: 1
+  graph_gradient_weight: 0.0
+  dt: 1
+  n_history: 1
+  max_rollout_steps: 10
+  rollout_schedule:
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  rollout_stage_epochs:
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  valid_rollout_steps: 10
+  validate_with_train_rollout: false
+  eval_rollout_steps:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  trainable_scope: all
+  checkpoint_metric: valid_S10_final
+  checkpoint_mode: min
+  stage_checkpoint_metric_mode: final_horizon
+  load_only_current_rollout: false
+  single_pass_multi_horizon_validation: true
+  training:
+    rollout_mode: curriculum
+    load_only_current_rollout: false
+    random_rollout:
+      min_horizon: 1
+      max_horizon: 1
+      distribution: uniform_integer
+      loss_type: all_steps_mean
+      final_step_weight: 0.0
+      detach_between_steps: false
+    fixed_train_rollout_steps: 1
+    rollout_loss_weights: uniform
+    activation_checkpointing: true
+    checkpoint_rollout_steps: true
+    scheduled_rollout:
+      phases: []
+  lr_schedule_type: warmup_cosine
+  warmup_epochs: 1
+  warmup_start_factor: 0.1
+  use_delta_normalization: true
+  delta_stats_path: data/stats/era5_67_2p5_delta_stats.npz
+  recompute_delta_stats: false
+  delta_norm_center: false
+  delta_norm_eps: 1.0e-06
+  in_channels: &id001
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
+  - 36
+  - 37
+  - 38
+  - 39
+  - 40
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+  - 46
+  - 47
+  - 48
+  - 49
+  - 50
+  - 51
+  - 52
+  - 53
+  - 54
+  - 55
+  - 56
+  - 57
+  - 58
+  - 59
+  - 60
+  - 61
+  - 62
+  - 63
+  - 64
+  - 65
+  - 66
+  out_channels: *id001
+  normalization: zscore
+  add_grid: false
+  N_grid_channels: 0
+  gridtype: sinusoidal
+  add_noise: false
+  noise_std: 0.0
+  crop_size_x: null
+  crop_size_y: null
+  roll: false
+  orography: false
+  orography_path: null
+  require_static_features: false
+  extra_features:
+    enabled: false
+    spatial:
+      lat_lon_sincos: false
+      orography: false
+      land_sea_mask: false
+    temporal:
+      dayofyear_sincos: false
+      use_target_time: true
+    known_forcings:
+      enabled: false
+      variables: []
+    static_handling:
+      copy_variables: []
+      exclude_loss_variables: []
+      override_prediction_with_known: []
+  target_handling:
+    enabled: true
+    copy_variables:
+    - orog
+    exclude_loss_variables:
+    - orog
+    known_future_variables: []
+  static_fields:
+    path: null
+    orography_name: orog
+    land_sea_mask_name: lsm
+  variable_metadata:
+    path: null
+  resolution_profiles:
+    2p5:
+      resolution_degrees: 2.5
+      grid_shape:
+      - 72
+      - 144
+      level_shapes:
+      - - 72
+        - 144
+      - - 36
+        - 72
+      - - 18
+        - 36
+      - - 9
+        - 18
+      train_data_path: /home/amin/KAI_5/era5_67/train
+      valid_data_path: /home/amin/KAI_5/era5_67/val
+      test_dataset_path: /home/amin/KAI_5/era5_67/test
+      graph_path: graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
+      global_means_path: /home/amin/KAI_5/era5_67/stats/global_mean.npy
+      global_stds_path: /home/amin/KAI_5/era5_67/stats/global_std.npy
+      delta_stats_path: data/stats/era5_67_2p5_delta_stats.npz
+      batch_size: 4
+      gradient_accumulation_steps: 3
+      max_gradient_norm: 0.5
+      enable_amp: true
+  exp_dir: runs
+  eval_checkpoint_path: null
+  eval_output_dir: null
+  eval_forecast_steps:
+  - 10
+  eval_fixed_rollout_steps: 10
+  eval_compare_stage_checkpoints: false
+  eval_stage_checkpoints:
+    1: best_ckpt_S1.tar
+    2: best_ckpt_S2.tar
+    4: best_ckpt_S4.tar
+    6: best_ckpt_S6.tar
+    8: best_ckpt_S8.tar
+    10: best_ckpt_S10.tar
+  eval_global_best_checkpoint: best_ckpt.tar
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  n_initial_conditions: 5
+  climatology_path: null
+  compute_climatology: true
+  climatology_chunk_size: 128
+  eval_device: cuda
+  eval_plot_variables:
+  - z500
+  - t2m
+  - t850
+  - msl
+  - q700
+  - u850
+  eval_plot_format: png
+  plot_persistence: true
+  save_checkpoint: true
+  resume: true
+  diagnostics:
+    enabled: false
+    baseline_compare:
+      enabled: false
+      baseline_name: null
+      baseline_rollout_curve_csv: null
+      baseline_scalars_json: null
+  wandb:
+    enabled: true
+    project: GraphWeather5p625
+    entity: amin1jafarzade-kaist
+    run_name: 2p5_l3_h160_densel3k24_currS2toS10x3_initckpt_wd1e2
+    tags:
+    - curriculum_rollout
+    - S2toS10
+    - 3ep_per_horizon
+    - init_from_checkpoint
+    - warmstart_from_dense_l3k24_S1_100ep
+    - 2p5
+    - l3
+    - hidden160
+    - dense_l3k24
+  resolution_degrees: 2.5
+  grid_shape:
+  - 72
+  - 144
+  level_shapes:
+  - - 72
+    - 144
+  - - 36
+    - 72
+  - - 18
+    - 36
+  - - 9
+    - 18
+  train_data_path: /home/amin/KAI_5/era5_67/train
+  valid_data_path: /home/amin/KAI_5/era5_67/val
+  test_dataset_path: /home/amin/KAI_5/era5_67/test
+  graph_path: graphs/graph_2p5_k8_l3k24_hybrid_row_aware_L3_v4.pt
+  global_means_path: /home/amin/KAI_5/era5_67/stats/global_mean.npy
+  global_stds_path: /home/amin/KAI_5/era5_67/stats/global_std.npy
+  hierarchy_type: standard
+  use_l4_ratio15: false
+  resolution: 2.5
+  expected_grid_shape:
+  - 72
+  - 144
+  node_counts:
+  - 10368
+  - 2592
+  - 648
+  - 162
+  edge_counts:
+  - 82944
+  - 20736
+  - 5184
+  - 3888
+  graph_format_version: 4
+  l3_k_neighbors: 24
+  input_channels: 134
+  output_channels: 67
+  use_l3: true
+  num_graph_levels: 4
+  l0_blocks: 2
+  l1_blocks: 2
+  l2_blocks: 1
+  l3_blocks: 1
+  l2_refine_after_l3_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  head_dim: 32
+  pooling:
+    type: default
+    init_scale: 1.0
+    max_scale: 2.0
+    mean_type: mean
+    include_max: true
+  use_l4: false
+  l4_blocks: 1
+  l3_refine_after_l4_blocks: 1
+  rollout_mode: curriculum
+  fixed_train_rollout_steps: 1
+  rollout_loss_weights: uniform
+  activation_checkpointing: true
+  checkpoint_rollout_steps: true
+  random_rollout:
+    min_horizon: 1
+    max_horizon: 1
+    distribution: uniform_integer
+    loss_type: all_steps_mean
+    final_step_weight: 0.0
+    detach_between_steps: false
+  scheduled_rollout:
+    phases: []
+  device: cuda:0
+  name: 2p5_l3_h160_densel3k24_currS2toS10x3_initckpt_wd1e2
+  log_every_batches: 100
+  init_from_checkpoint: runs/2p5_l3_h160_densel3k24_s1x100_wd1e2/best_ckpt.tar
+  init_from_checkpoint_strict: true

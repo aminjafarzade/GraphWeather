@@ -820,6 +820,14 @@ def _build_model(
         l0_refine=dict(_get(params, "l0_refine", {}) or {}),
         lead_conditioning=dict(_get(params, "lead_conditioning", {}) or {}),
         aux_feature_dim=0 if feature_builder is None else int(feature_builder.aux_feature_dim),
+        mesh_encoder=dict(_get(params, "mesh_encoder", {}) or {}),
+        # Structural, so they must match src/trainer.py or the checkpoint will not
+        # load: edge_encoding adds the gate MLP and swaps the attention bias for an
+        # MLP (the edge_gate arm), and boundary_mlp swaps embed/head for two-layer
+        # GELU stacks (arm E). Omitting them built a plain model and failed with a
+        # state_dict mismatch on every run that used either.
+        edge_encoding=dict(_get(params, "edge_encoding", {}) or {}),
+        boundary_mlp=bool(_get(params, "boundary_mlp", False)),
     ).to(device)
     return model
 

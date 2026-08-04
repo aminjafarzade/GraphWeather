@@ -136,6 +136,52 @@ class LeadConditioningConfig(_Section):
         return self._raw.get("added_input_channels", 0)
 
 
+class MeshEncoderConfig(_Section):
+    @property
+    def enabled(self) -> Any:
+        return self._raw.get("enabled", False)
+
+    @property
+    def refinement(self) -> Any:
+        return self._raw.get("refinement", 5)
+
+    @property
+    def g2m_radius_factor(self) -> Any:
+        return self._raw.get("g2m_radius_factor", 0.6)
+
+    @property
+    def aggregation(self) -> Any:
+        return self._raw.get("aggregation", "sum")
+
+    @property
+    def mlp_hidden_ratio(self) -> Any:
+        return self._raw.get("mlp_hidden_ratio", 2)
+
+    @property
+    def boundary_type(self) -> Any:
+        return self._raw.get("boundary_type", "legacy")
+
+    @property
+    def grid_skip_mlp(self) -> Any:
+        return self._raw.get("grid_skip_mlp", False)
+
+    @property
+    def grid_attention_encoder_blocks(self) -> Any:
+        return self._raw.get("grid_attention_encoder_blocks", 0)
+
+    @property
+    def grid_attention_decoder_blocks(self) -> Any:
+        return self._raw.get("grid_attention_decoder_blocks", 0)
+
+    @property
+    def grid_attention_k_neighbors(self) -> Any:
+        return self._raw.get("grid_attention_k_neighbors", 8)
+
+    @property
+    def coarse_level_connectivity(self) -> Any:
+        return self._raw.get("coarse_level_connectivity", "native_icosphere")
+
+
 class ModelConfig(_Section):
     """View over the ``model`` sub-dict of a resolved config."""
 
@@ -169,6 +215,10 @@ class ModelConfig(_Section):
     @property
     def lead_conditioning(self) -> LeadConditioningConfig:
         return LeadConditioningConfig(self._raw.get("lead_conditioning") or {})
+
+    @property
+    def mesh_encoder(self) -> MeshEncoderConfig:
+        return MeshEncoderConfig(self._raw.get("mesh_encoder") or {})
 
 
 # --------------------------------------------------------------------------- #
@@ -242,6 +292,14 @@ class RolloutConfig:
     @property
     def checkpoint_rollout_steps(self) -> Any:
         return self._flat.get("checkpoint_rollout_steps", False)
+
+    @property
+    def edge_projection_cache(self) -> Any:
+        return self._flat.get("edge_projection_cache", False)
+
+    @property
+    def attention_impl(self) -> Any:
+        return self._flat.get("attention_impl", "elementwise")
 
     @property
     def random_rollout(self) -> RandomRolloutConfig:
@@ -391,6 +449,10 @@ class AppConfig:
     @property
     def diagnostics(self) -> DiagnosticsConfig:
         return DiagnosticsConfig(self._flat.get("diagnostics") or {})
+
+    @property
+    def mesh_encoder(self) -> MeshEncoderConfig:
+        return MeshEncoderConfig(self._flat.get("mesh_encoder") or {})
 
     # --- dict-style delegation (lets AppConfig back a YParams shim later) ---- #
     def get(self, key: str, default: Any = None) -> Any:

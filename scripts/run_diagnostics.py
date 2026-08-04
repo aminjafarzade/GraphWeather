@@ -85,7 +85,7 @@ def main() -> None:
     params["resume"] = False
     params["checkpoint_path"] = os.path.abspath(os.path.expanduser(args.checkpoint))
     params["name"] = str(params.get("name", params.get("experiment_name", config_name)))
-    experiment_dir = params.get("experiment_dir", None) or params.get("exp_dir", None) or str(project_root / "diagnostics_eval")
+    experiment_dir = params.get("experiment_dir", None) or str(Path(params["checkpoint_path"]).parent)
     params["experiment_dir"] = os.path.abspath(os.path.expanduser(str(experiment_dir)))
     params["last_checkpoint_path"] = os.path.join(params["experiment_dir"], "last_ckpt.tar")
     params["best_checkpoint_path"] = os.path.join(params["experiment_dir"], "best_ckpt.tar")
@@ -93,11 +93,23 @@ def main() -> None:
     diagnostics["enabled"] = True
     diagnostics["run_after_training"] = False
     diagnostics["output_dir"] = os.path.dirname(os.path.abspath(os.path.expanduser(args.output))) or "."
+    available_variables = [str(x) for x in list(params.get("eval_plot_variables", []) or [])]
+    if available_variables:
+        diagnostics.setdefault("spectral_variables", available_variables)
+        plots_cfg = dict(diagnostics.get("plots", {}) or {})
+        plots_cfg.setdefault("variables", available_variables)
+        diagnostics["plots"] = plots_cfg
+        power_spectrum_cfg = dict(diagnostics.get("power_spectrum", {}) or {})
+        power_spectrum_cfg.setdefault("variables", available_variables)
+        diagnostics["power_spectrum"] = power_spectrum_cfg
     if args.max_full_diag_batches is not None:
         diagnostics["max_full_diag_batches"] = int(args.max_full_diag_batches)
     wandb_cfg = dict(diagnostics.get("wandb", {}) or {})
     if args.disable_wandb:
         wandb_cfg["enabled"] = False
+        trainer_wandb_cfg = dict(params.get("wandb", {}) or {})
+        trainer_wandb_cfg["enabled"] = False
+        params["wandb"] = trainer_wandb_cfg
     diagnostics["wandb"] = wandb_cfg
     params["diagnostics"] = diagnostics
 

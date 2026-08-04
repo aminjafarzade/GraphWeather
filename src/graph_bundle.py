@@ -12,14 +12,32 @@ from .graph_builder import validate_graph_cache_metadata
 class GraphLevel(nn.Module):
     def __init__(self, level_dict: dict[str, Any]):
         super().__init__()
-        self.height = int(level_dict["height"])
-        self.width = int(level_dict["width"])
+        # height/width are informational; mesh (icosphere) levels have no grid shape,
+        # so num_nodes is authoritative and height/width default to 0.
+        self.height = int(level_dict.get("height", 0))
+        self.width = int(level_dict.get("width", 0))
         self.num_nodes = int(level_dict["num_nodes"])
         self.k = int(level_dict["k"])
         self.register_buffer("coords", level_dict["coords"].to(torch.float32), persistent=False)
         self.register_buffer("lat_lon", level_dict["lat_lon"].to(torch.float32), persistent=False)
         self.register_buffer("edge_index", level_dict["edge_index"].to(torch.long), persistent=False)
         self.register_buffer("edge_attr", level_dict["edge_attr"].to(torch.float32), persistent=False)
+        # Optional per-edge validity mask (bool, [num_nodes*k] or [num_nodes,k]).
+        # Present only for mesh levels (padded icosphere degree-5 nodes). None on
+        # lat-lon levels -> LocalGraphAttention's masked_fill is skipped entirely.
+        edge_mask = level_dict.get("edge_mask", None)
+        if edge_mask is not None:
+            edge_mask = edge_mask.to(torch.bool)
+            if int(edge_mask.numel()) != self.num_nodes * self.k:
+                raise ValueError(
+                    f"edge_mask must contain num_nodes*k={self.num_nodes * self.k} entries, "
+                    f"got shape {tuple(edge_mask.shape)}."
+                )
+            if not bool(edge_mask.reshape(self.num_nodes, self.k).any(dim=1).all()):
+                raise ValueError("Every graph node must have at least one valid incoming edge.")
+            self.register_buffer("edge_mask", edge_mask, persistent=False)
+        else:
+            self.edge_mask = None
 
 
 class GraphBundle(nn.Module):
@@ -65,6 +83,79 @@ class GraphBundle(nn.Module):
             self.register_buffer("pool_L3_to_L4", pool["L3_to_L4"].to(torch.long), persistent=False)
         else:
             self.pool_L3_to_L4 = None
+
+        # --- mesh (icosphere) mode: the data grid + bipartite grid<->mesh edges ---
+        # Present only when metadata.graph_mode == "mesh"; grid bundles are unchanged.
+        self.graph_mode = str(self.metadata.get("graph_mode", "grid"))
+        if self.graph_mode == "mesh":
+            grid = bundle["grid"]
+            self.grid_height = int(grid.get("height", 0))
+            self.grid_width = int(grid.get("width", 0))
+            grid_lat_lon = grid["lat_lon"].to(torch.float32)
+            self.register_buffer("grid_lat_lon", grid_lat_lon, persistent=False)
+            self.register_buffer(
+                "grid_static",
+                torch.stack(
+                    [
+                        torch.sin(grid_lat_lon[:, 0]),
+                        torch.cos(grid_lat_lon[:, 0]),
+                        torch.sin(grid_lat_lon[:, 1]),
+                        torch.cos(grid_lat_lon[:, 1]),
+                    ],
+                    dim=1,
+                ),
+                persistent=False,
+            )
+            grid_coords = grid.get("coords", None)
+            if grid_coords is not None:
+                self.register_buffer("grid_coords", grid_coords.to(torch.float32), persistent=False)
+            else:
+                self.grid_coords = None
+            grid_attention_level = grid.get("attention_level", None)
+            if grid_attention_level is not None:
+                self.grid_attention_graph = GraphLevel(grid_attention_level)
+                if (
+                    self.grid_attention_graph.height != self.grid_height
+                    or self.grid_attention_graph.width != self.grid_width
+                    or self.grid_attention_graph.num_nodes != self.grid_height * self.grid_width
+                ):
+                    raise ValueError(
+                        "Mesh bundle grid attention graph does not match its data grid: "
+                        f"level={(self.grid_attention_graph.height, self.grid_attention_graph.width, self.grid_attention_graph.num_nodes)}, "
+                        f"grid={(self.grid_height, self.grid_width, self.grid_height * self.grid_width)}."
+                    )
+            else:
+                self.grid_attention_graph = None
+            g2m, m2g = bundle["g2m"], bundle["m2g"]
+            self.register_buffer("g2m_edge_index", g2m["edge_index"].to(torch.long), persistent=False)
+            self.register_buffer("g2m_edge_attr", g2m["edge_attr"].to(torch.float32), persistent=False)
+            g2m_edge_weight = g2m.get("edge_weight", None)
+            if g2m_edge_weight is not None:
+                self.register_buffer(
+                    "g2m_edge_weight",
+                    g2m_edge_weight.to(torch.float32),
+                    persistent=False,
+                )
+            else:
+                self.g2m_edge_weight = None
+            self.register_buffer("m2g_edge_index", m2g["edge_index"].to(torch.long), persistent=False)
+            self.register_buffer("m2g_edge_attr", m2g["edge_attr"].to(torch.float32), persistent=False)
+            m2g_edge_weight = m2g.get("edge_weight", None)
+            if m2g_edge_weight is not None:
+                self.register_buffer(
+                    "m2g_edge_weight",
+                    m2g_edge_weight.to(torch.float32),
+                    persistent=False,
+                )
+            else:
+                self.m2g_edge_weight = None
+            self.register_buffer("mesh_static", bundle["mesh_static"].to(torch.float32), persistent=False)
+        else:
+            self.grid_height = 0
+            self.grid_width = 0
+            self.grid_attention_graph = None
+            self.g2m_edge_weight = None
+            self.m2g_edge_weight = None
 
     @property
     def level0(self) -> GraphLevel:
@@ -114,7 +205,10 @@ def load_graph_bundle(
         raw = torch.load(path, map_location=map_location, weights_only=True)
     except TypeError:
         raw = torch.load(path, map_location=map_location)
-    if expected_metadata is not None:
+    raw_meta = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+    # Mesh (icosphere) bundles don't share the lat-lon grid's node/edge counts, so the
+    # grid-oriented cache validation doesn't apply; the mesh forward validates its own shapes.
+    if expected_metadata is not None and str(raw_meta.get("graph_mode", "grid")) != "mesh":
         mismatches = validate_graph_cache_metadata(raw, expected_metadata)
         if mismatches:
             details = "\n  ".join(mismatches)

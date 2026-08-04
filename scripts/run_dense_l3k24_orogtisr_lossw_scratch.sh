@@ -34,7 +34,7 @@ export CUDA_DEVICE_ORDER=PCI_BUS_ID          # make CUDA_VISIBLE_DEVICES match n
 export CUDA_VISIBLE_DEVICES="${GPU}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib-cache}"
-PYTHON="${PYTHON:-/lustre/home/ziya/miniconda3/envs/graphweather-cu128/bin/python}"  # pinned: bare python is unsafe on sm_120
+PYTHON="${PYTHON:-$HOME/miniconda3/envs/graphweather-cu128/bin/python}"  # pinned: bare python is unsafe on sm_120
 
 # --- locate repo root (works from anywhere) ----------------------------------
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"

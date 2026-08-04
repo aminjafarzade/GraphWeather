@@ -1,14 +1,31 @@
 from __future__ import annotations
 
+import contextlib
+import logging
+from collections.abc import Iterator
+
 import torch
 from torch import nn
 
 from .architecture import resolve_graph_architecture
 from .batch_adapter import GridNodeAdapter
-from .graph_bundle import GraphBundle
-from .layers import LocalGraphAttentionBlock
+from .graph_bundle import GraphBundle, GraphLevel
+from .layers import LocalGraphAttention, LocalGraphAttentionBlock, resolve_attention_impl
 from .lead_conditioning import build_lead_conditioning_grid
+from .mesh_layers import BipartiteMP, FixedBipartiteRemap, MLPLayerNorm
 from .processor import GraphUNetProcessor
+
+
+def _diag_name(collector: object | None, name: str) -> str | None:
+    """The name only matters when a collector will read it.
+
+    LocalGraphAttention uses ``diagnostics_name`` solely inside its
+    ``diagnostics_collector is not None`` branch, so with diagnostics off the string
+    is dead. Passing a distinct one per block anyway makes torch.compile specialize
+    ``LocalGraphAttentionBlock.forward`` once per block, and 11 blocks against the
+    default ``recompile_limit`` of 8 tips that frame back into eager.
+    """
+    return name if collector is not None else None
 
 
 class GraphWeatherModel(nn.Module):
@@ -49,16 +66,109 @@ class GraphWeatherModel(nn.Module):
         delta_norm_center: bool = False,
         delta_norm_eps: float = 1.0e-6,
         aux_feature_dim: int = 0,
+        mesh_encoder: dict | None = None,
+        edge_encoding: dict | None = None,
+        attention_impl: str | None = None,
+        boundary_mlp: bool = False,
+        head_init_std: float = 0.0,
     ):
         super().__init__()
         hidden_dim = int(hidden_dim)
         heads = int(heads)
         if hidden_dim % heads != 0:
             raise ValueError(f"hidden_dim={hidden_dim} must be divisible by num_heads={heads}.")
-        if graph.L0.height != grid_shape[0] or graph.L0.width != grid_shape[1]:
+        self.edge_encoding = dict(edge_encoding or {})
+        self.attention_impl = resolve_attention_impl(attention_impl)
+        self.boundary_mlp = bool(boundary_mlp)
+        self.head_init_std = float(head_init_std)
+        self.mesh_encoder = dict(mesh_encoder or {})
+        self._mesh_cfg = self.mesh_encoder
+        self.mesh_mode = bool(self.mesh_encoder.get("enabled", False))
+        self.mesh_boundary_type = str(
+            self.mesh_encoder.get("boundary_type", "legacy")
+        ).strip().lower()
+        if self.mesh_boundary_type not in {
+            "legacy",
+            "graphcast_mlp",
+            "fixed_spherical",
+        }:
             raise ValueError(
-                f"Graph L0 grid {(graph.L0.height, graph.L0.width)} does not match data grid {grid_shape}"
+                "mesh_encoder.boundary_type must be 'legacy', 'graphcast_mlp', "
+                "or 'fixed_spherical', "
+                f"got {self.mesh_boundary_type!r}."
             )
+        self.graphcast_mesh_boundary = self.mesh_mode and self.mesh_boundary_type == "graphcast_mlp"
+        self.fixed_spherical_boundary = (
+            self.mesh_mode and self.mesh_boundary_type == "fixed_spherical"
+        )
+        self.grid_skip_mlp_enabled = self.mesh_mode and bool(
+            self.mesh_encoder.get("grid_skip_mlp", False)
+        )
+        self.grid_attention_encoder_blocks = (
+            int(self.mesh_encoder.get("grid_attention_encoder_blocks", 0))
+            if self.mesh_mode
+            else 0
+        )
+        self.grid_attention_decoder_blocks = (
+            int(self.mesh_encoder.get("grid_attention_decoder_blocks", 0))
+            if self.mesh_mode
+            else 0
+        )
+        self.grid_attention_k_neighbors = (
+            int(self.mesh_encoder.get("grid_attention_k_neighbors", 8))
+            if self.mesh_mode
+            else 0
+        )
+        if self.grid_attention_encoder_blocks < 0 or self.grid_attention_decoder_blocks < 0:
+            raise ValueError("Mesh grid-attention block counts must be >= 0.")
+        if self.grid_skip_mlp_enabled and not self.graphcast_mesh_boundary:
+            raise ValueError(
+                "mesh_encoder.grid_skip_mlp=true requires "
+                "mesh_encoder.boundary_type='graphcast_mlp'."
+            )
+        if self.fixed_spherical_boundary and (
+            self.grid_attention_encoder_blocks
+            or self.grid_attention_decoder_blocks
+        ):
+            raise ValueError(
+                "mesh_encoder.boundary_type='fixed_spherical' maps raw channels "
+                "directly and cannot be combined with grid-attention blocks."
+            )
+        if self.mesh_mode:
+            # In mesh mode graph.L0 is the icosphere; the data grid lives on the bundle.
+            if str(getattr(graph, "graph_mode", "grid")) != "mesh":
+                raise ValueError("mesh_encoder.enabled=true but the graph bundle is not a mesh bundle (metadata.graph_mode != 'mesh').")
+            gh, gw = int(getattr(graph, "grid_height", 0)), int(getattr(graph, "grid_width", 0))
+            if (gh, gw) != (int(grid_shape[0]), int(grid_shape[1])):
+                raise ValueError(f"Mesh bundle grid {(gh, gw)} does not match data grid {tuple(grid_shape)}")
+            if (
+                self.grid_attention_encoder_blocks or self.grid_attention_decoder_blocks
+            ) and getattr(graph, "grid_attention_graph", None) is None:
+                raise ValueError(
+                    "Mesh grid-attention blocks require a mesh bundle containing "
+                    "grid['attention_level']."
+                )
+            if (
+                self.grid_attention_encoder_blocks or self.grid_attention_decoder_blocks
+            ) and int(graph.grid_attention_graph.k) != self.grid_attention_k_neighbors:
+                raise ValueError(
+                    "Mesh grid-attention graph k does not match the model config: "
+                    f"graph={graph.grid_attention_graph.k}, "
+                    f"mesh_encoder.grid_attention_k_neighbors={self.grid_attention_k_neighbors}."
+                )
+            if self.fixed_spherical_boundary and (
+                getattr(graph, "g2m_edge_weight", None) is None
+                or getattr(graph, "m2g_edge_weight", None) is None
+            ):
+                raise ValueError(
+                    "mesh_encoder.boundary_type='fixed_spherical' requires "
+                    "g2m.edge_weight and m2g.edge_weight in the mesh graph bundle."
+                )
+        else:
+            if graph.L0.height != grid_shape[0] or graph.L0.width != grid_shape[1]:
+                raise ValueError(
+                    f"Graph L0 grid {(graph.L0.height, graph.L0.width)} does not match data grid {grid_shape}"
+                )
         self.graph = graph
         self.hidden_dim = hidden_dim
         self.num_heads = heads
@@ -139,9 +249,29 @@ class GraphWeatherModel(nn.Module):
         self.output_channels = int(output_channels)
         self.base_node_feature_channels = int(self.adapter.node_feature_channels)
         self.total_node_feature_channels = int(self.base_node_feature_channels + self.aux_feature_dim)
-        self.embed = nn.Linear(self.total_node_feature_channels, hidden_dim)
+        self.grid_static_dim = 4 if self.graphcast_mesh_boundary else 0
+        self.embedding_input_channels = self.total_node_feature_channels + self.grid_static_dim
+        if self.graphcast_mesh_boundary:
+            boundary_hidden = hidden_dim * int(self._mesh_cfg.get("mlp_hidden_ratio", 2))
+            self.embed = MLPLayerNorm(
+                self.embedding_input_channels,
+                boundary_hidden,
+                hidden_dim,
+            )
+        elif self.boundary_mlp:
+            # Arm E: two-layer GELU encoder with output LayerNorm. Only the
+            # non-GraphCast-boundary path is swapped; the mesh path above keeps
+            # its MLPLayerNorm so existing checkpoints stay loadable.
+            self.embed = nn.Sequential(
+                nn.Linear(self.total_node_feature_channels, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+            )
+        else:
+            self.embed = nn.Linear(self.total_node_feature_channels, hidden_dim)
         self.encoder = nn.ModuleList(
-            [LocalGraphAttentionBlock(hidden_dim, edge_dim=edge_dim, heads=heads) for _ in range(encoder_blocks)]
+            [LocalGraphAttentionBlock(hidden_dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(encoder_blocks)]
         )
         self.processor = GraphUNetProcessor(
             hidden_dim,
@@ -162,11 +292,49 @@ class GraphWeatherModel(nn.Module):
             skip_fusion=self.skip_fusion,
             pooling=self.pooling,
             l0_refine=self.l0_refine_config,
+            edge_encoding=self.edge_encoding,
+            attention_impl=self.attention_impl,
         )
         self.decoder = nn.ModuleList(
-            [LocalGraphAttentionBlock(hidden_dim, edge_dim=edge_dim, heads=heads) for _ in range(decoder_blocks)]
+            [LocalGraphAttentionBlock(hidden_dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(decoder_blocks)]
         )
-        self.head = nn.Linear(hidden_dim, output_channels)
+        self.grid_encoder = nn.ModuleList(
+            [
+                LocalGraphAttentionBlock(
+                    hidden_dim, edge_dim=edge_dim, heads=heads,
+                    edge_encoding=self.edge_encoding, attention_impl=self.attention_impl,
+                )
+                for _ in range(self.grid_attention_encoder_blocks)
+            ]
+        )
+        self.grid_decoder = nn.ModuleList(
+            [
+                LocalGraphAttentionBlock(
+                    hidden_dim, edge_dim=edge_dim, heads=heads,
+                    edge_encoding=self.edge_encoding, attention_impl=self.attention_impl,
+                )
+                for _ in range(self.grid_attention_decoder_blocks)
+            ]
+        )
+        if self.boundary_mlp:
+            self.head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, output_channels),
+            )
+        else:
+            self.head = nn.Linear(hidden_dim, output_channels)
+        if self.head_init_std > 0.0:
+            # Small-init the FINAL projection so the initial delta is near zero.
+            # Works for both the Linear and Sequential head forms.
+            final_linear = self.head if isinstance(self.head, nn.Linear) else self.head[-1]
+            if not isinstance(final_linear, nn.Linear):
+                raise TypeError(
+                    f"head_init_std expects the final head module to be nn.Linear, got {type(final_linear)}"
+                )
+            nn.init.normal_(final_linear.weight, mean=0.0, std=self.head_init_std)
+            if final_linear.bias is not None:
+                nn.init.zeros_(final_linear.bias)
         mean = torch.zeros(output_channels, dtype=torch.float32) if delta_mean is None else delta_mean.detach().to(torch.float32).reshape(-1)
         std = torch.ones(output_channels, dtype=torch.float32) if delta_std is None else delta_std.detach().to(torch.float32).reshape(-1)
         if mean.numel() != output_channels or std.numel() != output_channels:
@@ -179,6 +347,166 @@ class GraphWeatherModel(nn.Module):
             raise ValueError(f"Delta std must be > eps={self.delta_norm_eps:g}.")
         self.register_buffer("delta_mean", mean)
         self.register_buffer("delta_std", std)
+
+        # GraphCast-style bipartite grid<->mesh encoder/decoder (mesh mode only).
+        # embed/encoder/processor/decoder/head and the delta+residual are reused as-is;
+        # only the domain crossing is new. Grid mode never builds these.
+        if self.mesh_mode and self.fixed_spherical_boundary:
+            self.grid_skip_mlp = None
+            self.mesh_node_init = None
+            self.grid2mesh = FixedBipartiteRemap()
+            self.mesh2grid = FixedBipartiteRemap()
+        elif self.mesh_mode:
+            mesh_static_dim = int(self.graph.mesh_static.shape[-1])
+            mlp_ratio = int(self._mesh_cfg.get("mlp_hidden_ratio", 2))
+            aggregation = str(self._mesh_cfg.get("aggregation", "sum")).strip().lower()
+            self.grid_skip_mlp = (
+                MLPLayerNorm(
+                    hidden_dim,
+                    hidden_dim * mlp_ratio,
+                    hidden_dim,
+                )
+                if self.grid_skip_mlp_enabled
+                else None
+            )
+            if self.graphcast_mesh_boundary:
+                self.mesh_node_init = MLPLayerNorm(
+                    mesh_static_dim,
+                    hidden_dim * mlp_ratio,
+                    hidden_dim,
+                )
+                g2m_edge_dim = int(self.graph.g2m_edge_attr.shape[-1])
+                m2g_edge_dim = int(self.graph.m2g_edge_attr.shape[-1])
+                if g2m_edge_dim != 10 or m2g_edge_dim != 10:
+                    raise ValueError(
+                        "mesh_encoder.boundary_type='graphcast_mlp' requires 10-D "
+                        "bipartite edge features (legacy 6-D + normalized distance "
+                        f"+ receiver-local relative xyz), got g2m={g2m_edge_dim}, m2g={m2g_edge_dim}."
+                    )
+            else:
+                self.mesh_node_init = nn.Linear(mesh_static_dim, hidden_dim)
+                g2m_edge_dim = int(edge_dim)
+                m2g_edge_dim = int(edge_dim)
+            self.grid2mesh = BipartiteMP(
+                hidden_dim,
+                edge_dim=g2m_edge_dim,
+                mlp_hidden_ratio=mlp_ratio,
+                aggregation=aggregation,
+                graphcast_mlp=self.graphcast_mesh_boundary,
+            )
+            self.mesh2grid = BipartiteMP(
+                hidden_dim,
+                edge_dim=m2g_edge_dim,
+                mlp_hidden_ratio=mlp_ratio,
+                aggregation=aggregation,
+                graphcast_mlp=self.graphcast_mesh_boundary,
+            )
+
+    # --- rollout-scoped cache for the static edge projections -----------------
+    # graph.edge_attr never changes, so edge_k/edge_v/edge_bias are constant
+    # across the autoregressive steps of one optimizer step. See
+    # LocalGraphAttention._edge_terms for why sharing one copy matters.
+
+    def _attention_modules(self) -> list[LocalGraphAttention]:
+        return [m for m in self.modules() if isinstance(m, LocalGraphAttention)]
+
+    def edge_cache_levels(self) -> list[tuple[GraphLevel | None, nn.ModuleList]]:
+        """Every ``(graph level, attention blocks)`` pair the forward pass uses.
+
+        The encoder and decoder are attention blocks in the grid configuration,
+        so they carry edge projections exactly like the processor blocks do and
+        must be warmed too.
+        """
+        # torch.compile(model.processor) wraps the submodule; edge_cache_levels
+        # lives on the original.
+        processor = getattr(self.processor, "_orig_mod", self.processor)
+        pairs: list[tuple[GraphLevel | None, nn.ModuleList]] = []
+        grid_graph = getattr(self.graph, "grid_attention_graph", None)
+        pairs.append((grid_graph, self.grid_encoder))
+        pairs.append((self.graph.L0, self.encoder))
+        pairs.extend(processor.edge_cache_levels())
+        pairs.append((self.graph.L0, self.decoder))
+        pairs.append((grid_graph, self.grid_decoder))
+        return pairs
+
+    @property
+    def edge_cache_enabled(self) -> bool:
+        return any(m._edge_cache is not None for m in self._attention_modules())
+
+    def enable_edge_cache(self) -> None:
+        for module in self._attention_modules():
+            module._edge_cache = {}
+
+    def clear_edge_cache(self) -> None:
+        for module in self._attention_modules():
+            module._edge_cache = None
+
+    def warm_edge_cache(self) -> int:
+        """Populate every enabled edge cache. Returns the number of modules warmed."""
+        attention_modules = self._attention_modules()
+        disabled = [m for m in attention_modules if m._edge_cache is None]
+        if disabled:
+            logging.warning(
+                "warm_edge_cache(): %d/%d LocalGraphAttention modules have no cache "
+                "enabled and were skipped; call enable_edge_cache() first.",
+                len(disabled),
+                len(attention_modules),
+            )
+        warmed: set[int] = set()
+        for level, blocks in self.edge_cache_levels():
+            if level is None:
+                continue
+            for block in blocks:
+                # NodewiseRefineMLP can stand in for an l0_refine block and has no .attn.
+                attn = getattr(block, "attn", None)
+                if not isinstance(attn, LocalGraphAttention) or attn._edge_cache is None:
+                    continue
+                attn._edge_terms(level)
+                warmed.add(id(attn))
+        expected = len(attention_modules) - len(disabled)
+        if len(warmed) != expected:
+            logging.warning(
+                "warm_edge_cache(): warmed %d of %d cache-enabled attention modules. An "
+                "un-warmed module populates its cache lazily, which is unsafe once "
+                "checkpoint_rollout_steps is on: step 2 would reuse tensors whose graph "
+                "step 1's checkpoint region already freed.",
+                len(warmed),
+                expected,
+            )
+        return len(warmed)
+
+    @contextlib.contextmanager
+    def edge_cache_scope(self, warm: bool = True) -> Iterator[None]:
+        """Share the static edge projections for the duration of this block.
+
+        Two constraints decide where the scope goes, and they pull in opposite
+        directions:
+
+        * Warming must happen **inside** the autocast context the rollout runs in,
+          or the cached projections carry the wrong dtype -- and **outside** every
+          ``torch.utils.checkpoint`` region, so the cached tensors are ordinary
+          inputs to each recomputation rather than tensors created inside step 1's
+          region.
+        * The scope must not close before ``backward()``. Non-reentrant checkpoint
+          recomputes during backward and pairs saved tensors positionally, so a
+          cache that is live on the way in and cleared on the way out changes the
+          recomputed op sequence and raises ``CheckpointError``.
+
+        ``warm=True`` suits callers that do their forward and (optional) backward
+        entirely inside the scope, already under autocast -- validation, evaluation,
+        tests. Training uses ``warm=False`` around forward *and* backward, and warms
+        from inside the autocast region via ``Trainer._warm_edge_cache()``.
+
+        The cache must never survive ``optimizer.step()``, hence the unconditional
+        clear.
+        """
+        self.enable_edge_cache()
+        try:
+            if warm:
+                self.warm_edge_cache()
+            yield
+        finally:
+            self.clear_edge_cache()
 
     def set_delta_normalization(
         self,
@@ -275,27 +603,131 @@ class GraphWeatherModel(nn.Module):
         elif self.aux_feature_dim:
             raise ValueError(f"Model was initialized with aux_feature_dim={self.aux_feature_dim}, but no aux_features were provided.")
         self._add_diag(diagnostics_collector, "model/node_input_with_aux", node_x)
+        if self.graphcast_mesh_boundary:
+            grid_static = self.graph.grid_static.to(device=node_x.device, dtype=node_x.dtype)
+            grid_static = grid_static.unsqueeze(0).expand(int(node_x.shape[0]), -1, -1)
+            node_x = torch.cat([node_x, grid_static], dim=-1)
+            self._add_diag(diagnostics_collector, "model/grid_input_with_geometry", node_x)
+        if self.fixed_spherical_boundary:
+            node_x = self.grid2mesh(
+                node_x,
+                self.graph.g2m_edge_index,
+                self.graph.g2m_edge_weight,
+                self.graph.L0.num_nodes,
+            )
+            self._add_diag(diagnostics_collector, "model/grid2mesh_raw", node_x)
         h = self.embed(node_x)
         self._add_diag(diagnostics_collector, "model/embed", h)
-        for idx, block in enumerate(self.encoder):
-            h = block(
-                h,
-                self.graph.L0,
-                diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"model/encoder.{idx}",
-            )
-            self._add_diag(diagnostics_collector, f"model/encoder.{idx}", h)
-        h = self.processor(h, diagnostics_collector=diagnostics_collector)
-        for idx, block in enumerate(self.decoder):
-            h = block(
-                h,
-                self.graph.L0,
-                diagnostics_collector=diagnostics_collector,
-                diagnostics_name=f"model/decoder.{idx}",
-            )
-            self._add_diag(diagnostics_collector, f"model/decoder.{idx}", h)
+        if self.mesh_mode:
+            if self.fixed_spherical_boundary:
+                for idx, block in enumerate(self.encoder):
+                    h = block(
+                        h,
+                        self.graph.L0,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/encoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/encoder.{idx}", h)
+                h = self.processor(h, diagnostics_collector=diagnostics_collector)
+                for idx, block in enumerate(self.decoder):
+                    h = block(
+                        h,
+                        self.graph.L0,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/decoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/decoder.{idx}", h)
+            else:
+                bsz = h.shape[0]
+                for idx, block in enumerate(self.grid_encoder):
+                    h = block(
+                        h,
+                        self.graph.grid_attention_graph,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/grid_encoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/grid_encoder.{idx}", h)
+                # The decoder already has a long grid skip through its residual
+                # destination update. Optionally enrich the carried grid latent with
+                # the encoder-side node MLP used by GraphCast's Grid2Mesh GNN. Keep
+                # Grid2Mesh messages sourced from the original embedding: both
+                # branches are outputs of the same encoder message-passing step.
+                h_grid_skip = h
+                if self.grid_skip_mlp is not None:
+                    h_grid_skip = h + self.grid_skip_mlp(h)
+                    self._add_diag(
+                        diagnostics_collector,
+                        "model/grid_skip_encoded",
+                        h_grid_skip,
+                    )
+                mesh_static = self.graph.mesh_static.to(device=h.device, dtype=h.dtype)
+                h_mesh = self.mesh_node_init(mesh_static).unsqueeze(0).expand(bsz, -1, -1)
+                h_mesh = self.grid2mesh(h, h_mesh, self.graph.g2m_edge_index, self.graph.g2m_edge_attr)
+                self._add_diag(diagnostics_collector, "model/grid2mesh", h_mesh)
+                for idx, block in enumerate(self.encoder):
+                    h_mesh = block(
+                        h_mesh,
+                        self.graph.L0,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/encoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/encoder.{idx}", h_mesh)
+                h_mesh = self.processor(h_mesh, diagnostics_collector=diagnostics_collector)
+                for idx, block in enumerate(self.decoder):
+                    h_mesh = block(
+                        h_mesh,
+                        self.graph.L0,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/decoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/decoder.{idx}", h_mesh)
+                h = self.mesh2grid(
+                    h_mesh,
+                    h_grid_skip,
+                    self.graph.m2g_edge_index,
+                    self.graph.m2g_edge_attr,
+                )
+                self._add_diag(diagnostics_collector, "model/mesh2grid", h)
+                for idx, block in enumerate(self.grid_decoder):
+                    h = block(
+                        h,
+                        self.graph.grid_attention_graph,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/grid_decoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/grid_decoder.{idx}", h)
+        else:
+            for idx, block in enumerate(self.encoder):
+                h = block(
+                    h,
+                    self.graph.L0,
+                    diagnostics_collector=diagnostics_collector,
+                    diagnostics_name=_diag_name(diagnostics_collector, f"model/encoder.{idx}"),
+                )
+                self._add_diag(diagnostics_collector, f"model/encoder.{idx}", h)
+            h = self.processor(h, diagnostics_collector=diagnostics_collector)
+            for idx, block in enumerate(self.decoder):
+                h = block(
+                    h,
+                    self.graph.L0,
+                    diagnostics_collector=diagnostics_collector,
+                    diagnostics_name=_diag_name(diagnostics_collector, f"model/decoder.{idx}"),
+                )
+                self._add_diag(diagnostics_collector, f"model/decoder.{idx}", h)
         delta_hat = self.head(h)
         self._add_diag(diagnostics_collector, "model/head_delta_normalized", delta_hat)
+        if self.fixed_spherical_boundary:
+            delta_hat = self.mesh2grid(
+                delta_hat,
+                self.graph.m2g_edge_index,
+                self.graph.m2g_edge_weight,
+                int(current_state_nodes.shape[1]),
+            )
+            self._add_diag(
+                diagnostics_collector,
+                "model/mesh2grid_delta_normalized",
+                delta_hat,
+            )
         return delta_hat, current_state_nodes
 
     def forward_steps(

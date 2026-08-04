@@ -108,6 +108,13 @@ class MeanMaxPool(nn.Module):
 
 
 class ParentUnpoolFuse(nn.Module):
+    """Replicate coarse parents onto fine nodes, then merge the encoder skip.
+
+    ``sum`` performs the parameter-free additive U-Net skip exactly. ``default``
+    and ``scalar_gated`` retain the historical concat-MLP behavior so existing
+    checkpoints keep their original architecture.
+    """
+
     def __init__(self, dim: int, skip_fusion: dict[str, Any] | None = None, name: str = ""):
         super().__init__()
         self.name = str(name)
@@ -115,7 +122,7 @@ class ParentUnpoolFuse(nn.Module):
         self.skip_fusion_type = str(raw.get("type", "default")).strip().lower()
         self.init_scale = float(raw.get("init_scale", 1.0))
         self.max_scale = float(raw.get("max_scale", 2.0))
-        if self.skip_fusion_type not in {"default", "scalar_gated"}:
+        if self.skip_fusion_type not in {"default", "scalar_gated", "sum"}:
             raise ValueError(f"Unsupported skip_fusion.type={self.skip_fusion_type!r}.")
         if self.init_scale <= 0.0 or self.max_scale <= 0.0 or self.init_scale >= self.max_scale:
             raise ValueError(
@@ -129,10 +136,14 @@ class ParentUnpoolFuse(nn.Module):
         else:
             self.register_parameter("skip_gate_logit", None)
             self.register_parameter("up_gate_logit", None)
-        self.fuse = nn.Sequential(
-            nn.Linear(2 * dim, dim),
-            nn.GELU(),
-            nn.Linear(dim, dim),
+        self.fuse = (
+            None
+            if self.skip_fusion_type == "sum"
+            else nn.Sequential(
+                nn.Linear(2 * dim, dim),
+                nn.GELU(),
+                nn.Linear(dim, dim),
+            )
         )
 
     def _scale_tensor(self, logit: torch.Tensor, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
@@ -167,7 +178,11 @@ class ParentUnpoolFuse(nn.Module):
     def forward(self, h_coarse: torch.Tensor, parent_map: torch.Tensor, h_skip: torch.Tensor) -> torch.Tensor:
         parent_map = parent_map.to(device=h_coarse.device)
         h_up = h_coarse[:, parent_map, :]
+        if self.skip_fusion_type == "sum":
+            return h_skip + h_up
         if self.skip_fusion_type == "scalar_gated":
             h_skip = self.skip_scale_tensor(dtype=h_skip.dtype, device=h_skip.device) * h_skip
             h_up = self.up_scale_tensor(dtype=h_up.dtype, device=h_up.device) * h_up
+        if self.fuse is None:
+            raise RuntimeError("Non-sum skip fusion requires a fusion module.")
         return self.fuse(torch.cat([h_skip, h_up], dim=-1))

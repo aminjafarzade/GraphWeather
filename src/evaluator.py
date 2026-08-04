@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import logging
+import math
 import os
 import time
 import calendar
@@ -482,6 +483,11 @@ class EvalConfig:
     delta_norm_center: bool
     delta_norm_eps: float
     wandb: dict[str, Any]
+    mesh_format_version: int | str = 0
+    mesh_encoder: dict[str, Any] | None = None  # GraphCast-style grid<->mesh mode (default: grid)
+    edge_encoding: dict[str, Any] | None = None
+    boundary_mlp: bool = False
+    head_init_std: float = 0.0
 
     @classmethod
     def from_params(cls, params: Any) -> "EvalConfig":
@@ -548,6 +554,7 @@ class EvalConfig:
             graph_path=str(_get(params, "graph_path", "")),
             graph_connectivity_strategy=str(_get(params, "graph_connectivity_strategy", "hybrid_row_aware_knn")),
             graph_format_version=_get(params, "graph_format_version", 0),
+            mesh_format_version=_get(params, "mesh_format_version", 0),
             hierarchy_type=str(_get(params, "hierarchy_type", "standard")),
             use_l4_ratio15=bool(_get(params, "use_l4_ratio15", False)),
             k_neighbors=int(_get(params, "k_neighbors", 8)),
@@ -647,6 +654,10 @@ class EvalConfig:
             delta_norm_center=bool(_get(params, "delta_norm_center", False)),
             delta_norm_eps=float(_get(params, "delta_norm_eps", 1.0e-6)),
             wandb=dict(_get(params, "wandb", {}) or {}),
+            mesh_encoder=dict(_get(params, "mesh_encoder", {}) or {}),
+            edge_encoding=dict(_get(params, "edge_encoding", {}) or {}),
+            boundary_mlp=bool(_get(params, "boundary_mlp", False)),
+            head_init_std=float(_get(params, "head_init_std", 0.0)),
         )
 
     def validate(self) -> None:
@@ -1635,6 +1646,10 @@ class GraphWeatherEvaluator:
             delta_norm_center=delta_norm_center,
             delta_norm_eps=self.cfg.delta_norm_eps,
             aux_feature_dim=int(self.feature_builder.aux_feature_dim),
+            mesh_encoder=getattr(self.cfg, "mesh_encoder", None),
+            edge_encoding=dict(getattr(self.cfg, "edge_encoding", None) or {}),
+            boundary_mlp=bool(getattr(self.cfg, "boundary_mlp", False)),
+            head_init_std=float(getattr(self.cfg, "head_init_std", 0.0)),
         ).to(self.device)
 
         missing, unexpected = model.load_state_dict(cleaned, strict=False)
@@ -1686,6 +1701,14 @@ class GraphWeatherEvaluator:
         return self.model.forward_steps(previous, current, aux_features=aux_features)
 
     def _validate_graph_resolution(self, metadata: dict[str, Any]) -> None:
+        graph_mode = str(metadata.get("graph_mode", "grid"))
+        mesh_config = dict(getattr(self.cfg, "mesh_encoder", None) or {})
+        mesh_enabled = bool(mesh_config.get("enabled", False))
+        if mesh_enabled != (graph_mode == "mesh"):
+            raise ValueError(
+                "Graph cache mode mismatch: "
+                f"loaded graph_mode={graph_mode!r}, mesh_encoder.enabled={mesh_enabled}."
+            )
         mode = metadata.get("resolution_mode", None)
         if mode is None:
             if self.cfg.resolution_mode == "5p625":
@@ -1703,30 +1726,171 @@ class GraphWeatherEvaluator:
                 f"Graph cache num_graph_levels={num_levels} does not match active model "
                 f"num_graph_levels={self.cfg.num_graph_levels}."
             )
-        graph_format_version = metadata.get("graph_format_version", 0)
-        if self.cfg.graph_format_version and graph_format_version != self.cfg.graph_format_version:
-            raise ValueError(
-                f"Graph cache mismatch: loaded graph has graph_format_version={graph_format_version}, "
-                f"config requires {self.cfg.graph_format_version}."
+        if graph_mode == "mesh":
+            from .mesh_builder import (
+                LEGACY_BIPARTITE_EDGE_FEATURES,
+                bipartite_edge_feature_dim,
+                bipartite_edge_feature_set,
+                bipartite_mapping_type,
+                mesh_connectivity_strategy,
+                normalize_coarse_level_connectivity,
             )
-        hierarchy = metadata.get("hierarchy_type", "standard")
-        if hierarchy is not None and str(hierarchy) != str(self.cfg.hierarchy_type):
-            raise ValueError(
-                f"Graph cache mismatch: loaded graph has hierarchy_type={hierarchy}, "
-                f"config requires {self.cfg.hierarchy_type}."
+
+            mesh_format_version = metadata.get("mesh_format_version", 0)
+            if self.cfg.mesh_format_version and mesh_format_version != self.cfg.mesh_format_version:
+                raise ValueError(
+                    f"Mesh graph cache mismatch: loaded graph has mesh_format_version={mesh_format_version}, "
+                    f"config requires {self.cfg.mesh_format_version}."
+                )
+            refinement = int(metadata.get("refinement", -1))
+            expected_refinement = int(mesh_config.get("refinement", -1))
+            if refinement != expected_refinement:
+                raise ValueError(
+                    f"Mesh graph cache mismatch: loaded graph has refinement={refinement}, "
+                    f"config requires {expected_refinement}."
+                )
+            expected_mapping_type = bipartite_mapping_type(
+                mesh_config.get("boundary_type", "legacy")
             )
-        use_l4_ratio15 = bool(metadata.get("use_l4_ratio15", False))
-        if use_l4_ratio15 != bool(self.cfg.use_l4_ratio15):
-            raise ValueError(
-                f"Graph cache mismatch: loaded graph has use_l4_ratio15={use_l4_ratio15}, "
-                f"config requires {self.cfg.use_l4_ratio15}."
+            mapping_type = str(
+                metadata.get("bipartite_mapping_type", "graphcast_radius")
             )
-        strategy = metadata.get("graph_connectivity_strategy", metadata.get("connectivity_strategy", None))
-        if strategy is not None and str(strategy) != str(self.cfg.graph_connectivity_strategy):
-            raise ValueError(
-                f"Graph cache mismatch: loaded graph has connectivity_strategy={strategy}, "
-                f"config requires {self.cfg.graph_connectivity_strategy}."
+            if mapping_type != expected_mapping_type:
+                raise ValueError(
+                    "Mesh graph cache mismatch: loaded graph has "
+                    f"bipartite_mapping_type={mapping_type!r}, "
+                    f"config requires {expected_mapping_type!r}."
+                )
+            if expected_mapping_type == "graphcast_radius":
+                radius_factor = float(
+                    metadata.get("g2m_radius_factor", float("nan"))
+                )
+                expected_radius_factor = float(
+                    mesh_config.get("g2m_radius_factor", 0.6)
+                )
+                if not math.isclose(
+                    radius_factor,
+                    expected_radius_factor,
+                    rel_tol=0.0,
+                    abs_tol=1.0e-12,
+                ):
+                    raise ValueError(
+                        "Mesh graph cache mismatch: loaded graph has "
+                        f"g2m_radius_factor={radius_factor}, config requires {expected_radius_factor}."
+                    )
+            expected_edge_features = bipartite_edge_feature_set(
+                mesh_config.get("boundary_type", "legacy")
             )
+            edge_features = metadata.get(
+                "bipartite_edge_features",
+                LEGACY_BIPARTITE_EDGE_FEATURES,
+            )
+            if edge_features != expected_edge_features:
+                raise ValueError(
+                    "Mesh graph cache mismatch: loaded graph has "
+                    f"bipartite_edge_features={edge_features!r}, "
+                    f"config requires {expected_edge_features!r}."
+                )
+            edge_dim = int(
+                metadata.get(
+                    "bipartite_edge_dim",
+                    bipartite_edge_feature_dim(edge_features),
+                )
+            )
+            expected_edge_dim = bipartite_edge_feature_dim(expected_edge_features)
+            if edge_dim != expected_edge_dim:
+                raise ValueError(
+                    "Mesh graph cache mismatch: loaded graph has "
+                    f"bipartite_edge_dim={edge_dim}, config requires {expected_edge_dim}."
+                )
+            coarse_connectivity = normalize_coarse_level_connectivity(
+                metadata.get("coarse_level_connectivity", "native_icosphere")
+            )
+            expected_coarse_connectivity = normalize_coarse_level_connectivity(
+                mesh_config.get("coarse_level_connectivity", "native_icosphere")
+            )
+            if coarse_connectivity != expected_coarse_connectivity:
+                raise ValueError(
+                    "Mesh graph cache mismatch: loaded graph has "
+                    f"coarse_level_connectivity={coarse_connectivity!r}, "
+                    f"config requires {expected_coarse_connectivity!r}."
+                )
+            expected_grid_attention = (
+                int(mesh_config.get("grid_attention_encoder_blocks", 0)) > 0
+                or int(mesh_config.get("grid_attention_decoder_blocks", 0)) > 0
+            )
+            grid_attention = bool(metadata.get("grid_attention_graph", False))
+            if grid_attention != expected_grid_attention:
+                raise ValueError(
+                    "Mesh graph cache mismatch: loaded graph has "
+                    f"grid_attention_graph={grid_attention}, "
+                    f"config requires {expected_grid_attention}."
+                )
+            if expected_grid_attention:
+                expected_grid_k = int(
+                    mesh_config.get("grid_attention_k_neighbors", 8)
+                )
+                grid_k = int(metadata.get("grid_attention_k_neighbors", -1))
+                if grid_k != expected_grid_k:
+                    raise ValueError(
+                        "Mesh graph cache mismatch: loaded graph has "
+                        f"grid_attention_k_neighbors={grid_k}, "
+                        f"config requires {expected_grid_k}."
+                    )
+                expected_grid_strategy = str(
+                    getattr(
+                        self.cfg,
+                        "graph_connectivity_strategy",
+                        "hybrid_row_aware_knn",
+                    )
+                )
+                grid_strategy = str(
+                    metadata.get("grid_attention_connectivity_strategy", "")
+                )
+                if grid_strategy != expected_grid_strategy:
+                    raise ValueError(
+                        "Mesh graph cache mismatch: loaded graph has "
+                        f"grid_attention_connectivity_strategy={grid_strategy!r}, "
+                        f"config requires {expected_grid_strategy!r}."
+                    )
+            hierarchy = metadata.get("hierarchy_type", None)
+            if str(hierarchy) != "icosphere":
+                raise ValueError(
+                    f"Mesh graph cache mismatch: loaded graph has hierarchy_type={hierarchy!r}, "
+                    "expected 'icosphere'."
+                )
+            strategy = metadata.get("graph_connectivity_strategy", metadata.get("connectivity_strategy", None))
+            expected_strategy = mesh_connectivity_strategy(expected_coarse_connectivity)
+            if str(strategy) != expected_strategy:
+                raise ValueError(
+                    f"Mesh graph cache mismatch: loaded graph has connectivity_strategy={strategy!r}, "
+                    f"expected {expected_strategy!r}."
+                )
+        else:
+            graph_format_version = metadata.get("graph_format_version", 0)
+            if self.cfg.graph_format_version and graph_format_version != self.cfg.graph_format_version:
+                raise ValueError(
+                    f"Graph cache mismatch: loaded graph has graph_format_version={graph_format_version}, "
+                    f"config requires {self.cfg.graph_format_version}."
+                )
+            hierarchy = metadata.get("hierarchy_type", "standard")
+            if hierarchy is not None and str(hierarchy) != str(self.cfg.hierarchy_type):
+                raise ValueError(
+                    f"Graph cache mismatch: loaded graph has hierarchy_type={hierarchy}, "
+                    f"config requires {self.cfg.hierarchy_type}."
+                )
+            use_l4_ratio15 = bool(metadata.get("use_l4_ratio15", False))
+            if use_l4_ratio15 != bool(self.cfg.use_l4_ratio15):
+                raise ValueError(
+                    f"Graph cache mismatch: loaded graph has use_l4_ratio15={use_l4_ratio15}, "
+                    f"config requires {self.cfg.use_l4_ratio15}."
+                )
+            strategy = metadata.get("graph_connectivity_strategy", metadata.get("connectivity_strategy", None))
+            if strategy is not None and str(strategy) != str(self.cfg.graph_connectivity_strategy):
+                raise ValueError(
+                    f"Graph cache mismatch: loaded graph has connectivity_strategy={strategy}, "
+                    f"config requires {self.cfg.graph_connectivity_strategy}."
+                )
         actual_level_k = metadata.get("level_k_neighbors", None)
         if actual_level_k is None:
             actual_level_k = [int(metadata.get("graph_k", metadata.get("k", self.cfg.k_neighbors)))] * num_levels
@@ -2269,6 +2433,14 @@ class GraphWeatherEvaluator:
         accumulator["initial_condition_indices"] = np.asarray(ics, dtype=np.int64)
         return accumulator
 
+    def _model_grid_shape(self) -> tuple[int, int]:
+        if self.model is None:
+            raise RuntimeError("Model must be loaded before reading its grid shape.")
+        graph = self.model.graph
+        if str(getattr(graph, "graph_mode", "grid")) == "mesh":
+            return int(graph.grid_height), int(graph.grid_width)
+        return int(graph.L0.height), int(graph.L0.width)
+
     @torch.no_grad()
     def _rollout_one_ic(
         self,
@@ -2285,8 +2457,7 @@ class GraphWeatherEvaluator:
             raise RuntimeError("Model must be loaded before rollout.")
 
         n_channels = len(self.cfg.out_channels)
-        height = self.model.graph.L0.height
-        width = self.model.graph.L0.width
+        height, width = self._model_grid_shape()
         mse = np.zeros((forecast_steps, n_channels), dtype=np.float64)
         acc = np.zeros((forecast_steps, n_channels), dtype=np.float64)
         loss_by_lead = (

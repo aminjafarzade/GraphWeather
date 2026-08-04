@@ -23,7 +23,7 @@ from src.solar import (  # noqa: E402
 )
 from src.target_handling import TargetHandling  # noqa: E402
 
-ERA5_TEST_FILE = Path("/lustre/home/ziya/KAI_5/era5_67/test/2018.nc")
+ERA5_TEST_FILE = Path("/home/amin/KAI_5/era5_67/test/2018.nc")
 
 
 class _NullLogger:

@@ -68,6 +68,8 @@ class ProjectionFaithfulnessTest(unittest.TestCase):
                 self.assertEqual(app.model.skip_fusion.to_dict(), m.get("skip_fusion") or {}, msg)
                 self.assertEqual(app.model.pooling.to_dict(), m.get("pooling") or {}, msg)
                 self.assertEqual(app.model.lead_conditioning.to_dict(), m.get("lead_conditioning") or {}, msg)
+                self.assertEqual(app.model.mesh_encoder.to_dict(), m.get("mesh_encoder") or {}, msg)
+                self.assertEqual(app.mesh_encoder.to_dict(), flat.get("mesh_encoder") or {}, msg)
                 if isinstance(m.get("l0_refine"), dict):
                     self.assertEqual(app.model.l0_refine.to_dict(), m["l0_refine"], msg)
                 else:
@@ -105,6 +107,19 @@ class ProjectionSemanticsTest(unittest.TestCase):
             "target_handling": {"enabled": True, "copy_variables": ["orog"]},
             "diagnostics": {"enabled": False, "baseline_compare": {"enabled": True}},
             "batch_size": 4,
+            "mesh_encoder": {
+                "enabled": True,
+                "refinement": 5,
+                "g2m_radius_factor": 0.6,
+                "mlp_hidden_ratio": 2,
+                "aggregation": "mean",
+                "boundary_type": "graphcast_mlp",
+                "grid_skip_mlp": True,
+                "grid_attention_encoder_blocks": 2,
+                "grid_attention_decoder_blocks": 2,
+                "grid_attention_k_neighbors": 8,
+                "coarse_level_connectivity": "full_m1",
+            },
         }
         app = AppConfig.from_resolved(flat)
         self.assertEqual(app.model.hidden_dim, 128)
@@ -118,6 +133,15 @@ class ProjectionSemanticsTest(unittest.TestCase):
         self.assertIs(app.diagnostics.enabled, False)
         self.assertIs(app.diagnostics.baseline_compare.enabled, True)
         self.assertEqual(app.data.batch_size, 4)
+        self.assertIs(app.mesh_encoder.enabled, True)
+        self.assertEqual(app.mesh_encoder.refinement, 5)
+        self.assertEqual(app.mesh_encoder.aggregation, "mean")
+        self.assertEqual(app.mesh_encoder.boundary_type, "graphcast_mlp")
+        self.assertIs(app.mesh_encoder.grid_skip_mlp, True)
+        self.assertEqual(app.mesh_encoder.grid_attention_encoder_blocks, 2)
+        self.assertEqual(app.mesh_encoder.grid_attention_decoder_blocks, 2)
+        self.assertEqual(app.mesh_encoder.grid_attention_k_neighbors, 8)
+        self.assertEqual(app.mesh_encoder.coarse_level_connectivity, "full_m1")
         self.assertEqual(app.model.to_dict(), flat["model"])  # lossless
 
     def test_defaults_and_absent_sections(self):

@@ -266,7 +266,7 @@ s1only_1p5_l3_hidden128_base_100epoch_dense_l3k24:
       train_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/train
       valid_data_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/valid
       test_dataset_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/test
-      graph_path: /lustre/home/ziya/GNN/GraphWeather5p625/graphs/graph_1p5_121x240_k8_l3k24_hybrid_row_aware_L3_v4.pt
+      graph_path: graphs/graph_1p5_121x240_k8_l3k24_hybrid_row_aware_L3_v4.pt
       global_means_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_mean.npy
       global_stds_path: ${GW_KAI_1P5_ROOT:-/lustre/home/mahmed/Hydro/kai_1p5_data}/stats/global_std.npy
       delta_stats_path: data/stats/kai_1p5_delta_stats.npz

@@ -24,6 +24,7 @@ from src.models import GraphWeatherModel  # noqa: E402
 from src.architecture import architecture_metadata, validate_checkpoint_architecture  # noqa: E402
 from src.lead_conditioning import build_lead_conditioning_grid, lead_sincos_values  # noqa: E402
 from src.layers import LocalGraphAttentionBlock, NodewiseRefineMLP  # noqa: E402
+from src.pooling import ParentUnpoolFuse  # noqa: E402
 from src.resolution import cell_center_lat_lon  # noqa: E402
 
 
@@ -392,6 +393,36 @@ class L3GraphUNetTest(unittest.TestCase):
         )
         for value in values.values():
             self.assertAlmostEqual(value, 1.0, places=6)
+        x = torch.randn(1, 134, 72, 144)
+        with torch.no_grad():
+            y = model(x)
+        self.assertEqual(tuple(y.shape), (1, 67, 72, 144))
+        self.assertTrue(torch.isfinite(y).all().item())
+
+    def test_sum_skip_fusion_is_exact_parent_plus_skip(self) -> None:
+        fusion = ParentUnpoolFuse(3, skip_fusion={"type": "sum"})
+        h_coarse = torch.tensor(
+            [[[1.0, 2.0, 3.0], [10.0, 20.0, 30.0]]],
+        )
+        parent_map = torch.tensor([0, 0, 1, 1])
+        h_skip = torch.tensor(
+            [[[0.1, 0.2, 0.3], [1.0, 1.0, 1.0], [2.0, 3.0, 4.0], [5.0, 6.0, 7.0]]],
+        )
+
+        actual = fusion(h_coarse, parent_map, h_skip)
+        expected = h_skip + h_coarse[:, parent_map, :]
+
+        self.assertTrue(torch.equal(actual, expected))
+        self.assertIsNone(fusion.fuse)
+        self.assertEqual(sum(parameter.numel() for parameter in fusion.parameters()), 0)
+
+    def test_sum_skip_fusion_model_forward(self) -> None:
+        model = self._l3_model(
+            hidden_dim=16,
+            skip_fusion={"type": "sum"},
+        )
+        self.assertEqual(model.skip_fusion["type"], "sum")
+        self.assertEqual(model.fusion_gate_values(), {})
         x = torch.randn(1, 134, 72, 144)
         with torch.no_grad():
             y = model(x)

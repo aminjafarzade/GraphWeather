@@ -37,6 +37,9 @@ def _expand_env_vars(value: Any) -> Any:
     return value
 
 
+from .layers import ATTENTION_IMPL_DEFAULT  # noqa: E402
+
+
 def normalize_training_config_dict(params: dict[str, Any]) -> dict[str, Any]:
     """Expose nested training rollout settings as stable top-level keys."""
     resolved = dict(params)
@@ -54,6 +57,12 @@ def normalize_training_config_dict(params: dict[str, Any]) -> dict[str, Any]:
     checkpoint_rollout_steps = bool(
         training.get("checkpoint_rollout_steps", resolved.get("checkpoint_rollout_steps", False))
     )
+    edge_projection_cache = bool(
+        training.get("edge_projection_cache", resolved.get("edge_projection_cache", False))
+    )
+    attention_impl = str(
+        training.get("attention_impl", resolved.get("attention_impl", ATTENTION_IMPL_DEFAULT))
+    ).strip().lower()
     random_rollout_raw = dict(resolved.get("random_rollout", {}) or {})
     random_rollout_raw.update(dict(training.get("random_rollout", {}) or {}))
     max_steps = int(resolved.get("max_rollout_steps", random_rollout_raw.get("max_horizon", fixed_steps)))
@@ -99,6 +108,8 @@ def normalize_training_config_dict(params: dict[str, Any]) -> dict[str, Any]:
     resolved["load_only_current_rollout"] = load_only_current_rollout
     resolved["activation_checkpointing"] = activation_checkpointing
     resolved["checkpoint_rollout_steps"] = checkpoint_rollout_steps
+    resolved["edge_projection_cache"] = edge_projection_cache
+    resolved["attention_impl"] = attention_impl
     resolved["random_rollout"] = dict(random_rollout)
     resolved["scheduled_rollout"] = dict(scheduled_rollout)
     resolved["training"] = {
@@ -109,6 +120,8 @@ def normalize_training_config_dict(params: dict[str, Any]) -> dict[str, Any]:
         "load_only_current_rollout": load_only_current_rollout,
         "activation_checkpointing": activation_checkpointing,
         "checkpoint_rollout_steps": checkpoint_rollout_steps,
+        "edge_projection_cache": edge_projection_cache,
+        "attention_impl": attention_impl,
         "random_rollout": dict(random_rollout),
         "scheduled_rollout": dict(scheduled_rollout),
     }
