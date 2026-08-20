@@ -56,8 +56,10 @@ SELECTION="${SELECTION:-stride}"
 STRIDE="${STRIDE:-7}"
 N_INITIAL_CONDITIONS="${N_INITIAL_CONDITIONS:-52}"
 START_TIMESTEP="${START_TIMESTEP:-1}"
-CLIMATOLOGY_PATH="${CLIMATOLOGY_PATH:-data/stats/2p5_train_dayofyear_climatology.nc}"
-KAI_CSV="${KAI_CSV:-data/baselines/kai_2p5.csv}"
+# Resolution-dependent: left empty here and resolved AFTER arg parsing, so
+# --resolution changes the default. An env var or --clim/--kai-csv flag wins.
+CLIMATOLOGY_PATH="${CLIMATOLOGY_PATH:-}"
+KAI_CSV="${KAI_CSV:-}"
 
 GRAPH_PATH="${GRAPH_PATH:-}"         # if set, the graph stage builds it when absent
 GRAPH_DATA="${GRAPH_DATA:-}"         # optional --data override for build_graph.py
@@ -131,6 +133,12 @@ while [[ $# -gt 0 ]]; do
     *) echo "ERROR: unknown argument: $1" >&2; exit 2;;
   esac
 done
+
+# --- resolution-aware defaults (flag/env overrides above win) ----------------
+# 2p5 resolves to the historical defaults byte-for-byte; 1p5 picks the 1.5-deg
+# climatology (built by the clim stage on first run) and KAI reference CSV.
+CLIMATOLOGY_PATH="${CLIMATOLOGY_PATH:-data/stats/${RESOLUTION_MODE}_train_dayofyear_climatology.nc}"
+KAI_CSV="${KAI_CSV:-data/baselines/kai_${RESOLUTION_MODE}.csv}"
 
 # --- GPU pinning -------------------------------------------------------------
 if [[ -n "${GPU}" ]]; then
@@ -353,8 +361,17 @@ train_one() {
       record_summary "train" "SKIPPED (ckpt exists)" "-"; return 0
     fi
   fi
+  # Multi-GPU: a comma-separated GPU list (GPU=5,6,7) launches one rank per
+  # GPU via torchrun; the trainer splits the global batch across ranks so the
+  # recipe is unchanged. A single GPU (or empty) runs exactly as before.
+  local nproc=1
+  [[ "${GPU}" == *,* ]] && nproc=$(awk -F',' '{print NF}' <<< "${GPU}")
   local cmd=( "${PYTHON}" )
   [[ "${TWO_PHASE}" == "1" ]] && cmd+=(-u)   # unbuffered for live tee logging (matches the initckpt scripts)
+  if (( nproc > 1 )); then
+    cmd+=( -m torch.distributed.run --standalone --nproc-per-node="${nproc}" )
+    log_master "== Multi-GPU train: ${nproc} ranks over GPUs ${GPU} =="
+  fi
   cmd+=( scripts/train.py
     --config "${cfg}" --config_name "${name}"
     --resolution_mode "${RESOLUTION_MODE}" --exp_dir "${RUNS_DIR}" --experiment_name "${name}" )

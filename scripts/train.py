@@ -194,6 +194,26 @@ def main() -> None:
 
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     world_rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if world_size > 1:
+        # Launched via torchrun: one process per GPU, joined over NCCL. The
+        # Trainer detects the initialized group and splits the global batch.
+        # device_id BINDS the process group to this rank's GPU: without it, a
+        # dist.barrier() issued before any tensor op guesses the device, lands
+        # every rank's barrier communicator on cuda:0, and the next collective
+        # on the real per-rank devices deadlocks in initNCCLComm (observed:
+        # 10-minute watchdog SIGABRT on the first weight broadcast).
+        import datetime
+        import torch
+        import torch.distributed as torch_dist
+        torch.cuda.set_device(local_rank)
+        torch_dist.init_process_group(
+            backend="nccl",
+            device_id=torch.device(f"cuda:{local_rank}"),
+            # Fail fast instead of the 10-minute default; override for slow
+            # first-time compiles via GW_DDP_TIMEOUT_SEC.
+            timeout=datetime.timedelta(seconds=int(os.environ.get("GW_DDP_TIMEOUT_SEC", "600"))),
+        )
 
     mode = str(params.resolution_mode)
     if args.experiment_name:
@@ -224,9 +244,15 @@ def main() -> None:
         logging.info("CUDA_VISIBLE_DEVICES: %s", os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>"))
     params.log()
 
-    trainer = Trainer(params, world_rank=world_rank, local_rank=local_rank)
-    trainer.train()
-    logging.info("DONE rank %d", world_rank)
+    try:
+        trainer = Trainer(params, world_rank=world_rank, local_rank=local_rank)
+        trainer.train()
+        logging.info("DONE rank %d", world_rank)
+    finally:
+        if world_size > 1:
+            import torch.distributed as torch_dist
+            if torch_dist.is_initialized():
+                torch_dist.destroy_process_group()
 
 
 if __name__ == "__main__":
