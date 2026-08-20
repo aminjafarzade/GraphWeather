@@ -32,6 +32,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7,<9"]
+# HEALPix grid support (resolution_mode: hpx32). Only needed to BUILD a HEALPix
+# graph bundle or to run scripts/regrid_latlon_healpix.py; every lat-lon path
+# imports nothing from here, so the CI fast lane does not install it.
+healpix = ["healpy>=1.16,<2"]
 
 [project.urls]
 Homepage = "https://github.com/ZiyaZeynalov/GraphWeather5p625"

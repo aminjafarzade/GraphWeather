@@ -488,6 +488,8 @@ class EvalConfig:
     edge_encoding: dict[str, Any] | None = None
     boundary_mlp: bool = False
     head_init_std: float = 0.0
+    level_dims: list[int] | None = None  # per-graph-level hidden widths (default: hidden_dim everywhere)
+    level_heads: list[int] | None = None
 
     @classmethod
     def from_params(cls, params: Any) -> "EvalConfig":
@@ -658,6 +660,16 @@ class EvalConfig:
             edge_encoding=dict(_get(params, "edge_encoding", {}) or {}),
             boundary_mlp=bool(_get(params, "boundary_mlp", False)),
             head_init_std=float(_get(params, "head_init_std", 0.0)),
+            level_dims=(
+                None
+                if _get(params, "level_dims", None) is None
+                else [int(x) for x in _get(params, "level_dims", None)]
+            ),
+            level_heads=(
+                None
+                if _get(params, "level_heads", None) is None
+                else [int(x) for x in _get(params, "level_heads", None)]
+            ),
         )
 
     def validate(self) -> None:
@@ -738,14 +750,15 @@ class GraphWeatherEvaluator:
                 f"Check {cfg.resolution_mode} statistics paths."
             )
         output_count = len(cfg.out_channels)
-        if output_count != 67:
-            raise AssertionError(f"Expected 67 output channels, got {output_count}")
         self.in_means = _select_state_stats(self.means_all, cfg.in_channels, output_count, "input mean")
         self.in_stds = _select_state_stats(self.stds_all, cfg.in_channels, output_count, "input std")
         self.out_means = _select_state_stats(self.means_all, cfg.out_channels, output_count, "output mean")
         self.out_stds = _select_state_stats(self.stds_all, cfg.out_channels, output_count, "output std")
-        if self.out_means.shape != (67,) or self.out_stds.shape != (67,):
-            raise AssertionError(f"Output normalization stats must have shape [67], got {self.out_means.shape}/{self.out_stds.shape}")
+        if self.out_means.shape != (output_count,) or self.out_stds.shape != (output_count,):
+            raise AssertionError(
+                f"Output normalization stats must have shape [{output_count}], "
+                f"got {self.out_means.shape}/{self.out_stds.shape}"
+            )
         self.model: Optional[GraphWeatherModel] = None
         self.variable_names: list[str] = []
         self.channel_names: list[str] = []
@@ -1623,6 +1636,8 @@ class GraphWeatherEvaluator:
             heads=self.cfg.num_heads,
             k_neighbors=self.cfg.k_neighbors,
             level_k_neighbors=self.cfg.level_k_neighbors,
+            level_dims=getattr(self.cfg, "level_dims", None),
+            level_heads=getattr(self.cfg, "level_heads", None),
             encoder_blocks=self.cfg.encoder_blocks,
             decoder_blocks=self.cfg.decoder_blocks,
             l0_blocks=self.cfg.l0_blocks,
@@ -1700,6 +1715,47 @@ class GraphWeatherEvaluator:
             return self.model.forward_steps(previous, current)
         return self.model.forward_steps(previous, current, aux_features=aux_features)
 
+    def _validate_healpix_mesh_cache(
+        self,
+        metadata: dict[str, Any],
+        mesh_config: dict[str, Any],
+    ) -> None:
+        """Identity of a HEALPix mesh bundle: nside, ordering, oversample, level k.
+
+        Mirrors what mesh_builder.expected_healpix_mesh_metadata pins at build time,
+        so evaluating with a cache built for a different mesh fails here instead of
+        silently scoring a model against the wrong geometry.
+        """
+        if str(metadata.get("mesh_hierarchy", "")) != "healpix":
+            raise ValueError(
+                "Mesh graph cache mismatch: config sets mesh_encoder.mesh_type='healpix' "
+                f"but the loaded graph has mesh_hierarchy={metadata.get('mesh_hierarchy')!r}. "
+                "Point at a HEALPix mesh bundle."
+            )
+        nside = int(metadata.get("nside", -1))
+        expected_nside = int(mesh_config.get("nside", 32))
+        if nside != expected_nside:
+            raise ValueError(
+                f"Mesh graph cache mismatch: loaded graph has nside={nside}, "
+                f"config requires {expected_nside}."
+            )
+        ordering = str(metadata.get("ordering", ""))
+        if ordering != "nest":
+            raise ValueError(
+                f"Mesh graph cache mismatch: loaded graph has ordering={ordering!r}; "
+                "HEALPix pooling requires NEST (parent = pixel >> 2)."
+            )
+        oversample = int(metadata.get("regrid_oversample", -1))
+        expected_oversample = int(mesh_config.get("regrid_oversample", 8))
+        if oversample != expected_oversample:
+            raise ValueError(
+                f"Mesh graph cache mismatch: loaded graph was built with "
+                f"regrid_oversample={oversample}, config requires {expected_oversample}. "
+                "The grid<->mesh weights differ."
+            )
+        # level_k_neighbors, node_counts and edge_counts are already validated by the
+        # shared tail of _validate_graph_resolution; nothing HEALPix-specific to add.
+
     def _validate_graph_resolution(self, metadata: dict[str, Any]) -> None:
         graph_mode = str(metadata.get("graph_mode", "grid"))
         mesh_config = dict(getattr(self.cfg, "mesh_encoder", None) or {})
@@ -1742,15 +1798,39 @@ class GraphWeatherEvaluator:
                     f"Mesh graph cache mismatch: loaded graph has mesh_format_version={mesh_format_version}, "
                     f"config requires {self.cfg.mesh_format_version}."
                 )
-            refinement = int(metadata.get("refinement", -1))
-            expected_refinement = int(mesh_config.get("refinement", -1))
-            if refinement != expected_refinement:
-                raise ValueError(
-                    f"Mesh graph cache mismatch: loaded graph has refinement={refinement}, "
-                    f"config requires {expected_refinement}."
-                )
-            expected_mapping_type = bipartite_mapping_type(
-                mesh_config.get("boundary_type", "legacy")
+            # A HEALPix mesh has no icosphere refinement, no g2m radius rule and no
+            # icosphere coarse connectivity; its identity is (nside, ordering,
+            # regrid_oversample, level_k). Checking the icosphere keys against it
+            # would compare int(None) and reject a valid cache, so the two
+            # hierarchies validate separately.
+            mesh_is_healpix = (
+                str(mesh_config.get("mesh_type", "icosphere")).strip().lower() == "healpix"
+            )
+            if mesh_is_healpix:
+                self._validate_healpix_mesh_cache(metadata, mesh_config)
+            else:
+                raw_refinement = metadata.get("refinement", -1)
+                if raw_refinement is None:
+                    # A HEALPix mesh bundle stores refinement=None. Without this the
+                    # int() below raises an opaque TypeError instead of telling the
+                    # user they pointed an icosphere config at a HEALPix graph.
+                    raise ValueError(
+                        "Mesh graph cache mismatch: the loaded graph has no icosphere "
+                        f"refinement (mesh_hierarchy={metadata.get('mesh_hierarchy')!r}), but the "
+                        "config asks for an icosphere mesh. Set mesh_encoder.mesh_type "
+                        "accordingly or point at an icosphere bundle."
+                    )
+                refinement = int(raw_refinement)
+                expected_refinement = int(mesh_config.get("refinement", -1))
+                if refinement != expected_refinement:
+                    raise ValueError(
+                        f"Mesh graph cache mismatch: loaded graph has refinement={refinement}, "
+                        f"config requires {expected_refinement}."
+                    )
+            expected_mapping_type = (
+                "healpix_conservative_area"
+                if mesh_is_healpix
+                else bipartite_mapping_type(mesh_config.get("boundary_type", "legacy"))
             )
             mapping_type = str(
                 metadata.get("bipartite_mapping_type", "graphcast_radius")
@@ -1803,18 +1883,21 @@ class GraphWeatherEvaluator:
                     "Mesh graph cache mismatch: loaded graph has "
                     f"bipartite_edge_dim={edge_dim}, config requires {expected_edge_dim}."
                 )
-            coarse_connectivity = normalize_coarse_level_connectivity(
-                metadata.get("coarse_level_connectivity", "native_icosphere")
-            )
-            expected_coarse_connectivity = normalize_coarse_level_connectivity(
-                mesh_config.get("coarse_level_connectivity", "native_icosphere")
-            )
-            if coarse_connectivity != expected_coarse_connectivity:
-                raise ValueError(
-                    "Mesh graph cache mismatch: loaded graph has "
-                    f"coarse_level_connectivity={coarse_connectivity!r}, "
-                    f"config requires {expected_coarse_connectivity!r}."
+            if not mesh_is_healpix:
+                # 'native_healpix' is deliberately not a member of the icosphere
+                # connectivity enum, so normalizing it would raise.
+                coarse_connectivity = normalize_coarse_level_connectivity(
+                    metadata.get("coarse_level_connectivity", "native_icosphere")
                 )
+                expected_coarse_connectivity = normalize_coarse_level_connectivity(
+                    mesh_config.get("coarse_level_connectivity", "native_icosphere")
+                )
+                if coarse_connectivity != expected_coarse_connectivity:
+                    raise ValueError(
+                        "Mesh graph cache mismatch: loaded graph has "
+                        f"coarse_level_connectivity={coarse_connectivity!r}, "
+                        f"config requires {expected_coarse_connectivity!r}."
+                    )
             expected_grid_attention = (
                 int(mesh_config.get("grid_attention_encoder_blocks", 0)) > 0
                 or int(mesh_config.get("grid_attention_decoder_blocks", 0)) > 0
@@ -1854,13 +1937,18 @@ class GraphWeatherEvaluator:
                         f"config requires {expected_grid_strategy!r}."
                     )
             hierarchy = metadata.get("hierarchy_type", None)
-            if str(hierarchy) != "icosphere":
+            expected_hierarchy = "healpix" if mesh_is_healpix else "icosphere"
+            if str(hierarchy) != expected_hierarchy:
                 raise ValueError(
                     f"Mesh graph cache mismatch: loaded graph has hierarchy_type={hierarchy!r}, "
-                    "expected 'icosphere'."
+                    f"expected {expected_hierarchy!r}."
                 )
             strategy = metadata.get("graph_connectivity_strategy", metadata.get("connectivity_strategy", None))
-            expected_strategy = mesh_connectivity_strategy(expected_coarse_connectivity)
+            expected_strategy = (
+                "native_healpix"
+                if mesh_is_healpix
+                else mesh_connectivity_strategy(expected_coarse_connectivity)
+            )
             if str(strategy) != expected_strategy:
                 raise ValueError(
                     f"Mesh graph cache mismatch: loaded graph has connectivity_strategy={strategy!r}, "

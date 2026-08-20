@@ -93,6 +93,102 @@ RESOLUTION_ALIASES: dict[str, str] = {
 }
 
 
+# --- HEALPix ----------------------------------------------------------------
+# There are TWO independent ways HEALPix enters this repo. Do not confuse them:
+#
+#  (1) HEALPix-NATIVE (resolution_mode: hpx32). The data itself is HEALPix on
+#      disk and the whole pipeline runs on pixels. That is what the rest of this
+#      section, RESOLUTION_SPECS["hpx32"] and grid_kind() are about.
+#
+#  (2) HEALPix-AS-MESH (resolution_mode stays 2p5/1p5/..., mesh_encoder.mesh_type:
+#      healpix). The data stays lat-lon end to end; the model regrids to HEALPix
+#      on the way in and back on the way out via fixed conservative weights, so
+#      the delta, the loss and the evaluator are all still lat-lon. None of the
+#      hpx32 machinery below is used -- see mesh_builder.build_healpix_mesh_bundle
+#      and healpix_regrid.py.
+#
+# --- (1) HEALPix-native -----------------------------------------------------
+# HEALPix grids are carried through the whole pipeline as a DEGENERATE lat-lon
+# grid of shape (npix, 1): H = npix, W = 1. That is what makes this feature
+# cheap: every [B, C, H, W] reshape, the GridNodeAdapter, the normalization
+# reshape(1, -1, 1, 1), the models.py "L0 grid == data grid" check, and
+# LatitudeWeightedMSE's per-row weight buffer all keep working with no edits.
+#
+# Only code that derives *meaning* from H/W branches on grid_kind():
+#   - pixel coordinates      -> graph_builder.healpix_level_lat_lon (not linspace)
+#   - pool maps              -> graph_builder.healpix_pool_map (NEST p >> 2)
+#   - 2-D FFTs               -> rejected in config validation (rfft2 over (N,1))
+#   - loss latitude weights  -> uniform (equal-area pixels; see trainer)
+#
+# Pixel counts are exactly 12 * nside**2, and each coarsening step divides by 4
+# (a quadtree), NOT by 2 per axis like a lat-lon grid -- which is why
+# coarsened_level_shapes() must not be used for these specs.
+HEALPIX_NSIDES: dict[str, int] = {"hpx32": 32}
+
+# Nominal angular pixel size, degrees: sqrt(4*pi/npix). Informational only --
+# nothing derives connectivity from it (spherical kNN uses real coordinates).
+HEALPIX_RESOLUTION_DEGREES: dict[str, float] = {"hpx32": 1.8323}
+
+
+def require_healpy():
+    """The single healpy import guard for the repo.
+
+    Kept here, in the lowest-level module, so ``graph_builder`` (adjacency),
+    ``healpix_regrid`` (overlap operators) and ``mesh_builder`` (mesh bundles)
+    all raise the same actionable message. Nothing on a lat-lon path reaches it.
+    """
+    try:
+        import healpy as hp
+    except ImportError as exc:  # pragma: no cover - dependency guard
+        raise ImportError(
+            "HEALPix support needs healpy. Install the optional extra:\n"
+            "    pip install -e '.[healpix]'\n"
+            "Lat-lon runs never import it."
+        ) from exc
+    return hp
+
+
+def healpix_npix(nside: int) -> int:
+    """Pixel count of a HEALPix map. Exact, no healpy import needed."""
+    nside = int(nside)
+    if nside < 1 or (nside & (nside - 1)) != 0:
+        raise ValueError(f"HEALPix nside must be a positive power of two, got {nside}.")
+    return 12 * nside * nside
+
+
+def healpix_level_nsides(nside: int, num_levels: int) -> tuple[int, ...]:
+    """nside per U-Net level, coarsening by a factor of 2 (4x fewer pixels)."""
+    nside = int(nside)
+    sides = []
+    for _ in range(int(num_levels)):
+        if nside < 1:
+            raise ValueError(
+                f"Cannot build {num_levels} HEALPix levels from nside={int(nside)}: "
+                "ran out of resolution."
+            )
+        sides.append(nside)
+        nside //= 2
+    return tuple(sides)
+
+
+def healpix_level_shapes(nside: int, num_levels: int) -> tuple[tuple[int, int], ...]:
+    return tuple((healpix_npix(side), 1) for side in healpix_level_nsides(nside, num_levels))
+
+
+RESOLUTION_SPECS["hpx32"] = ResolutionSpec(
+    name="hpx32",
+    resolution_degrees=HEALPIX_RESOLUTION_DEGREES["hpx32"],
+    height=healpix_npix(HEALPIX_NSIDES["hpx32"]),
+    width=1,
+    # nside 32 / 16 / 8 / 4 -> 12288 / 3072 / 768 / 192 pixels.
+    level_shapes=healpix_level_shapes(HEALPIX_NSIDES["hpx32"], 4),
+)
+
+RESOLUTION_ALIASES.update({"hpx32": "hpx32", "healpix32": "hpx32", "hpxns32": "hpx32"})
+
+HEALPIX_MODES: frozenset[str] = frozenset(HEALPIX_NSIDES)
+
+
 def canonicalize_resolution_mode(mode: Any | None) -> str:
     if mode is None or str(mode).strip() == "":
         return "5p625"
@@ -107,9 +203,31 @@ def get_resolution_spec(mode: Any | None) -> ResolutionSpec:
     return RESOLUTION_SPECS[canonicalize_resolution_mode(mode)]
 
 
+def grid_kind(mode: Any | None) -> str:
+    """``"healpix"`` or ``"latlon"``. Every caller defaults to lat-lon."""
+    return "healpix" if canonicalize_resolution_mode(mode) in HEALPIX_MODES else "latlon"
+
+
+def healpix_nside_for_mode(mode: Any | None) -> int:
+    canonical = canonicalize_resolution_mode(mode)
+    if canonical not in HEALPIX_NSIDES:
+        raise ValueError(f"resolution_mode '{canonical}' is not a HEALPix mode.")
+    return HEALPIX_NSIDES[canonical]
+
+
 def cell_center_lat_lon(height: int, width: int) -> tuple[torch.Tensor, torch.Tensor]:
     height = int(height)
     width = int(width)
+    if width == 1:
+        # A one-column lat-lon grid is meaningless, so width == 1 always means a
+        # HEALPix map carried as (npix, 1). Returning a linspace here would hand
+        # the caller `height` fabricated latitudes and silently corrupt whatever
+        # it feeds (edge features, climatology latitudes, loss weights).
+        raise ValueError(
+            f"cell_center_lat_lon(height={height}, width=1) is lat-lon only; width=1 "
+            "indicates a HEALPix grid. Use graph_builder.healpix_level_lat_lon(nside) "
+            "for pixel centers, or pass the lat-lon evaluation grid instead."
+        )
     dlat = 180.0 / float(height)
     dlon = 360.0 / float(width)
     latitudes = np.linspace(-90.0 + dlat / 2.0, 90.0 - dlat / 2.0, height, dtype=np.float32)
@@ -232,6 +350,20 @@ def resolve_level_shapes_for_config(
             )
         else:
             return raw_shapes
+
+    if spec.name in HEALPIX_MODES:
+        # A HEALPix hierarchy is a quadtree: each level has 4x fewer pixels, so
+        # coarsened_level_shapes()'s per-axis ceil(h/2) would give 6144 where the
+        # parent map (p >> 2) actually lands 3072. Take the spec's exact shapes.
+        levels = int(num_graph_levels)
+        available = spec.level_shapes
+        if levels > len(available):
+            raise ValueError(
+                f"resolution_mode='{spec.name}' defines {len(available)} HEALPix levels "
+                f"(nside {', '.join(str(s) for s in healpix_level_nsides(HEALPIX_NSIDES[spec.name], len(available)))}), "
+                f"but num_graph_levels={levels} was requested."
+            )
+        return [[int(h), int(w)] for h, w in available[:levels]]
 
     hierarchy = str(hierarchy_type or "standard").strip().lower()
     if bool(use_l4_ratio15) or hierarchy == "ratio15_l4":

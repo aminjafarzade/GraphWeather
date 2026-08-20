@@ -30,9 +30,15 @@ from .resolution import (
 
 GRAPH_FORMAT_VERSION = 2
 GRAPH_FORMAT_VERSION_L3 = 3
+# HEALPix bundles carry their own format version so a lat-lon cache and a HEALPix
+# cache can never satisfy each other's validation, in either direction.
+GRAPH_FORMAT_VERSION_HPX = "hpx_nest_v1"
 PURE_SPHERICAL_KNN = "pure_spherical_knn"
 HYBRID_ROW_AWARE_KNN = "hybrid_row_aware_knn"
-SUPPORTED_CONNECTIVITY_STRATEGIES = {PURE_SPHERICAL_KNN, HYBRID_ROW_AWARE_KNN}
+# True HEALPix adjacency (8 slots, 24 pixels padded to degree 7 and masked).
+# HEALPix grids only; rejected on lat-lon grids, which have no such adjacency.
+HEALPIX_NATIVE = "healpix_native"
+SUPPORTED_CONNECTIVITY_STRATEGIES = {PURE_SPHERICAL_KNN, HYBRID_ROW_AWARE_KNN, HEALPIX_NATIVE}
 
 
 def regular_lat_lon(
@@ -398,8 +404,19 @@ def neighbor_diagnostics(
     height = int(height)
     width = int(width)
     target_ids = np.arange(num_nodes, dtype=np.int64)
-    target_rows = (target_ids // width)[:, None]
-    neighbor_rows = neighbors // width
+    # A MESH level has no grid shape and passes (0, 0). The row statistics below
+    # divide the node index by `width` to recover a latitude row, which is both a
+    # divide-by-zero and meaningless there -- a mesh node is not in any row. Treat
+    # every node as its own row so the counts come out as "no row structure"
+    # (same_row = k, cross_row = 0) instead of warning and reporting garbage.
+    has_rows = width > 0
+    row_divisor = width if has_rows else 1
+    target_rows = (target_ids // row_divisor)[:, None]
+    neighbor_rows = neighbors // row_divisor
+    if not has_rows:
+        # Collapse to a single row: no neighbour can be "north" or "south" of another.
+        target_rows = np.zeros_like(target_rows)
+        neighbor_rows = np.zeros_like(neighbor_rows)
 
     unique_counts = np.asarray([len(set(row.tolist())) for row in neighbors], dtype=np.int64)
     duplicate_neighbors = int(np.sum(k - unique_counts))
@@ -411,12 +428,17 @@ def neighbor_diagnostics(
     other_row = k - same_row - north_row - south_row
     components = _connected_component_count(edge_index, num_nodes)
 
-    interior_mask = (target_ids // width > 0) & (target_ids // width < height - 1)
-    north_edge_adjacent = np.sum(neighbor_rows[:width] == 1, axis=1) if height > 1 else np.asarray([], dtype=np.int64)
-    south_start = (height - 1) * width
-    south_edge_adjacent = (
-        np.sum(neighbor_rows[south_start:] == height - 2, axis=1) if height > 1 else np.asarray([], dtype=np.int64)
-    )
+    if has_rows:
+        interior_mask = (target_ids // width > 0) & (target_ids // width < height - 1)
+        north_edge_adjacent = np.sum(neighbor_rows[:width] == 1, axis=1) if height > 1 else np.asarray([], dtype=np.int64)
+        south_start = (height - 1) * width
+        south_edge_adjacent = (
+            np.sum(neighbor_rows[south_start:] == height - 2, axis=1) if height > 1 else np.asarray([], dtype=np.int64)
+        )
+    else:
+        interior_mask = np.zeros(num_nodes, dtype=bool)
+        north_edge_adjacent = np.asarray([], dtype=np.int64)
+        south_edge_adjacent = np.asarray([], dtype=np.int64)
 
     diagnostics: dict[str, Any] = {
         "nodes": int(num_nodes),
@@ -690,6 +712,166 @@ def _coordinate_pyramid(
     return levels, pools
 
 
+def _require_healpy():
+    from .resolution import require_healpy
+
+    return require_healpy()
+
+
+def healpix_level_lat_lon(nside: int) -> torch.Tensor:
+    """HEALPix pixel centers as ``(npix, 2)`` of ``(lat, lon)`` in RADIANS.
+
+    Matches the convention ``grid_nodes`` returns, so ``edge_features`` and
+    ``build_spherical_knn_neighbors`` consume it unchanged.
+
+    Note the argument order below: with ``lonlat=True`` healpy returns
+    ``(lon, lat)`` in DEGREES -- the opposite order from this repo's ``(lat, lon)``
+    and a silent source of transposed graphs if swapped.
+    """
+    hp = _require_healpy()
+    from .resolution import healpix_npix
+
+    npix = healpix_npix(nside)
+    lon_deg, lat_deg = hp.pix2ang(int(nside), np.arange(npix), nest=True, lonlat=True)
+    lat = torch.deg2rad(torch.as_tensor(np.asarray(lat_deg), dtype=torch.float32))
+    lon = torch.deg2rad(torch.as_tensor(np.asarray(lon_deg), dtype=torch.float32))
+    return torch.stack([lat, lon], dim=-1)
+
+
+def healpix_native_neighbours(nside: int) -> tuple[np.ndarray, np.ndarray]:
+    """True HEALPix adjacency as ``(npix, 8)`` sources plus a validity mask.
+
+    Degrees, measured against healpy (which reports a missing slot as ``-1``):
+
+      * ``nside >= 2``: every pixel has 8 geometric neighbours except exactly 24,
+        which have 7 -- they sit at the corners where only three base faces meet.
+      * ``nside == 1``: the 12 base pixels are a special case and ALL have degree
+        6, so two of the eight slots are padding on every pixel. Only relevant as
+        a coarsest U-Net level; it is handled, not rejected.
+
+    Invalid slots are padded with a **self-edge** and marked invalid, exactly the
+    way mesh_builder pads the icosphere's degree-5 vertices. The self index keeps
+    every gather in range while ``LocalGraphAttention`` masks the slot to ``-inf``
+    before softmax, so it contributes nothing to the attention weights or the
+    value sum.
+
+    This is what spherical kNN cannot express: kNN always returns exactly k nodes,
+    so at the low-degree pixels it silently promotes a non-adjacent pixel to a
+    neighbour rather than admitting the degree is lower.
+    """
+    hp = _require_healpy()
+    from .resolution import healpix_npix
+
+    npix = healpix_npix(nside)
+    raw = np.asarray(hp.get_all_neighbours(int(nside), np.arange(npix), nest=True))
+    if raw.shape != (8, npix):
+        raise RuntimeError(f"Expected healpy neighbours of shape (8, {npix}), got {raw.shape}.")
+    neighbours = raw.T.astype(np.int64).copy()          # (npix, 8), node-major
+    mask = neighbours >= 0
+    self_index = np.broadcast_to(np.arange(npix, dtype=np.int64)[:, None], neighbours.shape)
+    neighbours = np.where(mask, neighbours, self_index)
+    return neighbours, mask
+
+
+def _healpix_make_level(
+    nside: int,
+    coords: torch.Tensor,
+    lat_lon: torch.Tensor,
+    k: int,
+) -> dict[str, torch.Tensor | int]:
+    """Level dict from native HEALPix adjacency, with ``edge_mask``.
+
+    Deliberately does NOT go through ``make_level``: ``neighbor_diagnostics``
+    asserts zero self-loops and exactly k unique neighbours per node, both of
+    which the padded low-degree pixels violate by construction.
+    """
+    from .resolution import healpix_npix
+
+    if int(k) != 8:
+        raise ValueError(
+            f"Native HEALPix adjacency has exactly 8 slots per pixel, so k must be 8, got {k}. "
+            "Use graph_connectivity_strategy='pure_spherical_knn' for a different k."
+        )
+    npix = healpix_npix(nside)
+    neighbours, mask = healpix_native_neighbours(nside)
+    edge_index = neighbors_to_edge_index(neighbours)
+    edge_attr = edge_features(lat_lon, edge_index)
+    flat_mask = torch.as_tensor(mask.reshape(-1), dtype=torch.bool)
+    edge_attr = edge_attr.clone()
+    edge_attr[~flat_mask] = 0.0                        # inert (masked) slots
+    degree = mask.sum(axis=1)
+    return {
+        "height": int(npix),
+        "width": 1,
+        "num_nodes": int(npix),
+        "k": int(k),
+        "coords": coords.to(torch.float32),
+        "lat_lon": lat_lon.to(torch.float32),
+        "edge_index": edge_index.to(torch.long),
+        "edge_attr": edge_attr.to(torch.float32),
+        "edge_mask": flat_mask,
+        "neighbor_diagnostics": {
+            "strategy": HEALPIX_NATIVE,
+            "nside": int(nside),
+            "num_nodes": int(npix),
+            "k": int(k),
+            "degree_min": int(degree.min()),
+            "degree_max": int(degree.max()),
+            # Full histogram rather than hardcoded 7/8 counts: nside 1 is uniform
+            # degree 6, so a fixed pair of buckets would read as all-zero there.
+            "degree_histogram": {
+                int(value): int(count)
+                for value, count in zip(*np.unique(degree, return_counts=True))
+            },
+            "masked_edge_slots": int((~mask).sum()),
+        },
+    }
+
+
+def healpix_pool_map(npix_fine: int) -> torch.Tensor:
+    """Fine-to-coarse parent index for a HEALPix quadtree.
+
+    In NEST ordering the parent of pixel ``p`` at ``nside`` is exactly ``p >> 2``
+    at ``nside // 2`` -- four children per parent, no exceptions and no boundary
+    cases. That is the whole reason NEST is required: with RING ordering there is
+    no such relation and the pool map would need a coordinate lookup.
+    """
+    npix_fine = int(npix_fine)
+    if npix_fine % 4 != 0:
+        raise ValueError(f"HEALPix npix must be divisible by 4 to pool, got {npix_fine}.")
+    return torch.arange(npix_fine, dtype=torch.long) >> 2
+
+
+def _healpix_pyramid(nside: int, num_graph_levels: int) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor]]:
+    """Pixel centers and pool maps per level. Mirrors ``_coordinate_pyramid``."""
+    from .resolution import healpix_level_nsides, healpix_npix
+
+    sides = healpix_level_nsides(int(nside), int(num_graph_levels))
+    levels: list[dict[str, Any]] = []
+    pools: dict[str, torch.Tensor] = {}
+    for idx, side in enumerate(sides):
+        lat_lon = healpix_level_lat_lon(side)
+        coords = F.normalize(lat_lon_to_3d(lat_lon[:, 0], lat_lon[:, 1]), dim=-1)
+        npix = healpix_npix(side)
+        levels.append(
+            {
+                "name": f"L{idx}",
+                # carried as a degenerate (npix, 1) lat-lon grid; see resolution.py
+                "height": int(npix),
+                "width": 1,
+                "coords": coords,
+                "lat_lon": lat_lon,
+                "nside": int(side),
+            }
+        )
+        if idx > 0:
+            fine_npix = healpix_npix(sides[idx - 1])
+            pool_map = healpix_pool_map(fine_npix)
+            validate_pool_map(pool_map, fine_npix, npix)
+            pools[f"L{idx - 1}_to_L{idx}"] = pool_map
+    return levels, pools
+
+
 def make_level(
     coords: torch.Tensor,
     lat_lon: torch.Tensor,
@@ -774,6 +956,8 @@ def _coordinate_metadata(
     level_shapes: list[list[int]] | tuple[tuple[int, int], ...] | None = None,
     hierarchy_type: str | None = None,
     use_l4_ratio15: bool = False,
+    pyramid_override: list[dict[str, Any]] | None = None,
+    pools_override: dict[str, torch.Tensor] | None = None,
 ) -> dict[str, Any]:
     height0 = int(latitudes_deg.numel())
     width0 = int(longitudes_deg.numel())
@@ -781,14 +965,21 @@ def _coordinate_metadata(
     hierarchy = str(hierarchy_type or "standard").strip().lower()
     if bool(use_l4_ratio15):
         hierarchy = "ratio15_l4"
-    pyramid, pools = _coordinate_pyramid(
-        latitudes_deg,
-        longitudes_deg,
-        num_graph_levels=num_graph_levels,
-        level_shapes=level_shapes,
-        hierarchy_type=hierarchy,
-        use_l4_ratio15=use_l4_ratio15,
-    )
+    if pyramid_override is not None:
+        # HEALPix: the caller already built the quadtree pyramid, and rebuilding it
+        # through _coordinate_pyramid would take the lat-lon branch and produce the
+        # wrong level shapes and coordinate hashes.
+        pyramid = pyramid_override
+        pools = pools_override if pools_override is not None else {}
+    else:
+        pyramid, pools = _coordinate_pyramid(
+            latitudes_deg,
+            longitudes_deg,
+            num_graph_levels=num_graph_levels,
+            level_shapes=level_shapes,
+            hierarchy_type=hierarchy,
+            use_l4_ratio15=use_l4_ratio15,
+        )
     strategy = normalize_connectivity_strategy(connectivity_strategy)
     row_cfg = normalize_row_aware_config(row_aware_knn)
     level_k_values = list(
@@ -1073,15 +1264,43 @@ def build_graph_bundle(
     hierarchy = str(hierarchy_type or "standard").strip().lower()
     if bool(use_l4_ratio15):
         hierarchy = "ratio15_l4"
-    pyramid, pools = _coordinate_pyramid(
-        latitudes_deg,
-        longitudes_deg,
-        num_graph_levels=num_graph_levels,
-        level_shapes=level_shapes,
-        hierarchy_type=hierarchy,
-        use_l4_ratio15=use_l4_ratio15,
-    )
     strategy = normalize_connectivity_strategy(connectivity_strategy)
+
+    from .resolution import grid_kind as _grid_kind
+
+    kind = _grid_kind(resolution_mode) if resolution_mode is not None else "latlon"
+    if kind == "healpix":
+        from .resolution import healpix_nside_for_mode
+
+        if strategy not in {HEALPIX_NATIVE, PURE_SPHERICAL_KNN}:
+            raise ValueError(
+                f"resolution_mode='{resolution_mode}' is a HEALPix grid and requires "
+                f"graph_connectivity_strategy '{HEALPIX_NATIVE}' (recommended: true "
+                f"adjacency, degree-7 pixels masked) or '{PURE_SPHERICAL_KNN}', got "
+                f"'{strategy}'. Row-aware kNN is meaningless on a (npix, 1) grid: "
+                "every row is one pixel."
+            )
+        if hierarchy != "standard":
+            raise ValueError(
+                f"HEALPix grids support hierarchy_type='standard' only, got '{hierarchy}'."
+            )
+        nside = healpix_nside_for_mode(resolution_mode)
+        pyramid, pools = _healpix_pyramid(nside, num_graph_levels)
+    else:
+        if strategy == HEALPIX_NATIVE:
+            raise ValueError(
+                f"graph_connectivity_strategy='{HEALPIX_NATIVE}' requires a HEALPix "
+                "resolution_mode (e.g. hpx32); a lat-lon grid has no HEALPix adjacency."
+            )
+        nside = None
+        pyramid, pools = _coordinate_pyramid(
+            latitudes_deg,
+            longitudes_deg,
+            num_graph_levels=num_graph_levels,
+            level_shapes=level_shapes,
+            hierarchy_type=hierarchy,
+            use_l4_ratio15=use_l4_ratio15,
+        )
     row_cfg = normalize_row_aware_config(row_aware_knn)
     level_k_values = list(
         resolve_level_k_neighbors(
@@ -1094,18 +1313,46 @@ def build_graph_bundle(
             k_neighbors=int(k),
         )
     )
-    levels = {
-        str(level["name"]): make_level(
-            level["coords"],
-            level["lat_lon"],
-            int(level["height"]),
-            int(level["width"]),
-            int(level_k_values[idx]),
-            strategy,
-            row_cfg,
-        )
-        for idx, level in enumerate(pyramid)
-    }
+    if strategy == HEALPIX_NATIVE:
+        # Per-level dispatch. Native adjacency has exactly 8 slots, so a level that
+        # asks for a different k (e.g. the dense coarsest level, k=24) falls back to
+        # spherical kNN for that level only. Levels at k=8 keep true adjacency and
+        # the degree-7 masking; deliberately densified levels keep their reach.
+        levels = {}
+        level_strategies: dict[str, str] = {}
+        for idx, level in enumerate(pyramid):
+            name = str(level["name"])
+            k_level = int(level_k_values[idx])
+            if k_level == 8:
+                levels[name] = _healpix_make_level(
+                    int(level["nside"]), level["coords"], level["lat_lon"], k_level
+                )
+                level_strategies[name] = HEALPIX_NATIVE
+            else:
+                levels[name] = make_level(
+                    level["coords"],
+                    level["lat_lon"],
+                    int(level["height"]),
+                    int(level["width"]),
+                    k_level,
+                    PURE_SPHERICAL_KNN,
+                    row_cfg,
+                )
+                level_strategies[name] = PURE_SPHERICAL_KNN
+    else:
+        level_strategies = {}
+        levels = {
+            str(level["name"]): make_level(
+                level["coords"],
+                level["lat_lon"],
+                int(level["height"]),
+                int(level["width"]),
+                int(level_k_values[idx]),
+                strategy,
+                row_cfg,
+            )
+            for idx, level in enumerate(pyramid)
+        }
     metadata = _coordinate_metadata(
         latitudes_deg=latitudes_deg,
         longitudes_deg=longitudes_deg,
@@ -1119,11 +1366,28 @@ def build_graph_bundle(
         level_shapes=level_shapes,
         hierarchy_type=hierarchy,
         use_l4_ratio15=use_l4_ratio15,
+        pyramid_override=pyramid if kind == "healpix" else None,
+        pools_override=pools if kind == "healpix" else None,
     )
     metadata["diagnostics"] = {
         name: dict(level["neighbor_diagnostics"])
         for name, level in levels.items()
     }
+    if kind == "healpix":
+        # Distinct cache identity, so a lat-lon bundle and a HEALPix bundle can
+        # never be loaded in place of one another: the format version differs and
+        # the per-level coordinate hashes differ.
+        metadata["grid_kind"] = "healpix"
+        metadata["nside"] = int(nside)
+        metadata["ordering"] = "nest"
+        metadata["pooling_map_strategy"] = "nest_quadtree"
+        metadata["level_nsides"] = [int(level["nside"]) for level in pyramid]
+        metadata["level_connectivity_strategies"] = dict(level_strategies)
+        metadata["graph_format_version"] = GRAPH_FORMAT_VERSION_HPX
+    # NOTE: lat-lon bundles deliberately get NO "grid_kind" key. Adding one would
+    # change the metadata of every existing cache, so validate_graph_cache_metadata
+    # would report a mismatch and silently rebuild every lat-lon graph on disk.
+    # Absent therefore means lat-lon: read it as metadata.get("grid_kind", "latlon").
 
     return {
         "metadata": metadata,

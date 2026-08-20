@@ -44,6 +44,12 @@ data/*
 # --- Graphs (auto-built at runtime via auto_build_graph: true) ----------------
 graphs/
 
+# --- Cached lat-lon <-> HEALPix regrid operators (rebuilt on demand) ---------
+# Runs put these next to delta_stats (data/ is already ignored); the tests build
+# their own copy. Deterministic from (grid, nside, oversample), so never committed.
+tests/_healpix_regrid_cache/
+regrid_operators/
+
 # --- Release/experiment bundles (hundreds of MB each; never commit) ----------
 *.zip
 *.tar

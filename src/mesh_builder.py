@@ -36,6 +36,12 @@ LEGACY_BIPARTITE_EDGE_FEATURES = "legacy_spherical_6"
 GRAPHCAST_BIPARTITE_EDGE_FEATURES = "legacy_plus_receiver_local_10"
 GRAPHCAST_RADIUS_MAPPING = "graphcast_radius"
 FIXED_SPHERICAL_MAPPING = "fixed_spherical_barycentric"
+# Fixed, parameter-free remap like FIXED_SPHERICAL_MAPPING, but the weights come
+# from exact spherical area overlap rather than barycentric interpolation over
+# triangular faces (HEALPix has no triangulation). Both drive the same
+# boundary_type='fixed_spherical' code path in models.py.
+HEALPIX_CONSERVATIVE_MAPPING = "healpix_conservative_area"
+FIXED_MAPPING_TYPES = frozenset({FIXED_SPHERICAL_MAPPING, HEALPIX_CONSERVATIVE_MAPPING})
 FIXED_SPHERICAL_METHOD = "spherical_triangle_area_barycentric"
 FIXED_SPHERICAL_POLE_HANDLING = "longitude_ring_mean"
 NATIVE_COARSE_CONNECTIVITY = "native_icosphere"
@@ -816,6 +822,11 @@ def validate_mesh_cache_metadata(
         "grid_coordinate_hash",
         "bipartite_mapping_type",
         "coarse_level_connectivity",
+        # HEALPix-mesh identity. Absent from both sides on the icosphere path
+        # (None == None), so existing icosphere caches are not invalidated.
+        "mesh_hierarchy",
+        "nside",
+        "regrid_oversample",
     ):
         actual_value = actual.get(
             key,
@@ -823,7 +834,21 @@ def validate_mesh_cache_metadata(
         )
         if actual_value != expected.get(key):
             mismatches.append(f"{key}: cache={actual_value!r}, expected={expected.get(key)!r}")
-    if expected.get("bipartite_mapping_type") == FIXED_SPHERICAL_MAPPING:
+    if expected.get("mesh_hierarchy") == "healpix":
+        # HEALPix-only, because an icosphere cache already stores level_k_neighbors
+        # while expected_mesh_metadata does not emit it -- validating it globally
+        # would report a mismatch on every icosphere graph on disk and rebuild it.
+        actual_level_k = actual.get("level_k_neighbors", None)
+        expected_level_k = expected.get("level_k_neighbors", None)
+        if actual_level_k is not None:
+            actual_level_k = [int(x) for x in actual_level_k]
+        if expected_level_k is not None:
+            expected_level_k = [int(x) for x in expected_level_k]
+        if actual_level_k != expected_level_k:
+            mismatches.append(
+                f"level_k_neighbors: cache={actual_level_k!r}, expected={expected_level_k!r}"
+            )
+    if expected.get("bipartite_mapping_type") in FIXED_MAPPING_TYPES:
         for key in (
             "fixed_spherical_method",
             "fixed_spherical_pole_handling",
@@ -1163,6 +1188,427 @@ def build_mesh_bundle(
 
 def build_and_save(path: str, **kwargs: Any) -> dict[str, Any]:
     bundle = build_mesh_bundle(**kwargs)
+    Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+    torch.save(bundle, path)
+    return bundle["metadata"]
+
+
+# --------------------------------------------------------------------------- #
+# HEALPix mesh (in-model regridding)
+# --------------------------------------------------------------------------- #
+# The icosphere above and the HEALPix mesh below produce the SAME bundle
+# structure, so models.py, mesh_layers.py and graph_bundle.py need no changes:
+# only the mesh geometry and the grid<->mesh weights differ.
+#
+#   icosphere : nodes = subdivided triangle vertices, degree 6 (12 at degree 5),
+#               pool = refinement parent, g2m/m2g = spherical barycentric over
+#               triangular faces.
+#   healpix   : nodes = NEST pixel centers, degree 8 (24 at degree 7),
+#               pool = p >> 2 quadtree, g2m/m2g = conservative area overlap.
+#
+# HEALPix has no triangulation, so the barycentric machinery above cannot be
+# reused for the boundary -- the conservative operators from healpix_regrid.py
+# take its place. Both are parameter-free and row-normalized, so the same
+# `boundary_type: fixed_spherical` code path in models.py drives either one.
+HEALPIX_MESH_FORMAT_VERSION = "hpx_mesh_v1"
+HEALPIX_CONSERVATIVE_METHOD = "healpix_conservative_area_overlap"
+HEALPIX_CONSERVATIVE_POLE_HANDLING = "area_weighted_no_special_case"
+NATIVE_HEALPIX_CONNECTIVITY = "native_healpix"
+_HEALPIX_K = 8  # uniform padded degree for HEALPix mesh levels
+
+
+def healpix_mesh_graph_path(
+    resolution_mode: str,
+    nside: int,
+    num_graph_levels: int,
+) -> str:
+    return (
+        f"graphs/graph_{str(resolution_mode)}_healpix_ns{int(nside)}_"
+        f"l{int(num_graph_levels) - 1}.pt"
+    )
+
+
+def _healpix_mesh_level_dict(nside: int) -> dict[str, Any]:
+    """One mesh level from true HEALPix adjacency, shaped like ``_level_dict``.
+
+    ``height``/``width`` are 0 because a mesh level has no grid shape -- the same
+    convention the icosphere levels use. That is the one difference from
+    ``graph_builder._healpix_make_level``, which builds a HEALPix level that IS
+    the data grid (height=npix, width=1) for the ``resolution_mode: hpx32`` path.
+    """
+    from .graph_builder import healpix_level_lat_lon, healpix_native_neighbours
+    from .resolution import healpix_npix
+
+    npix = healpix_npix(nside)
+    lat_lon = healpix_level_lat_lon(nside)
+    coords = torch.nn.functional.normalize(
+        torch.from_numpy(_latlon_to_xyz(lat_lon.numpy()).astype(np.float32)),
+        dim=-1,
+    )
+    neighbours, mask = healpix_native_neighbours(nside)
+    src = neighbours.reshape(-1)
+    dst = np.repeat(np.arange(npix, dtype=np.int64), _HEALPIX_K)
+    edge_index = np.stack([src, dst], axis=0)
+    edge_attr = edge_features(lat_lon, torch.from_numpy(edge_index)).numpy()
+    edge_attr[~mask.reshape(-1)] = 0.0  # inert (masked) slots
+    return {
+        "height": 0,
+        "width": 0,
+        "num_nodes": int(npix),
+        "k": _HEALPIX_K,
+        "coords": coords,
+        "lat_lon": lat_lon,
+        "edge_index": torch.from_numpy(edge_index),
+        "edge_attr": torch.from_numpy(edge_attr.astype(np.float32)),
+        "edge_mask": torch.from_numpy(mask),
+    }
+
+
+def _grid_axes_from_lat_lon(
+    grid_ll: np.ndarray,
+    grid_shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Recover the 1-D lat/lon axes in DEGREES from a flattened radian grid.
+
+    The regrid operators integrate over cell edges, so they need the separable
+    axes rather than the flattened node list. Reshaping to (H, W, 2) and taking
+    column 0 / row 0 only works if the flattening is latitude-major -- which is
+    asserted here rather than assumed, because getting it backwards would
+    transpose every grid<->mesh weight without any shape error.
+    """
+    height, width = int(grid_shape[0]), int(grid_shape[1])
+    grid = np.asarray(grid_ll, dtype=np.float64).reshape(height, width, 2)
+    lats = np.rad2deg(grid[:, 0, 0])
+    lons = np.rad2deg(grid[0, :, 1])
+    if not np.allclose(np.rad2deg(grid[..., 0]), lats[:, None], atol=1.0e-4):
+        raise ValueError(
+            "Mesh data grid is not latitude-major: latitude varies within a row. "
+            "grid_lat_lon must be flattened as node = lat_index * width + lon_index."
+        )
+    if not np.allclose(np.rad2deg(grid[..., 1]), lons[None, :], atol=1.0e-4):
+        raise ValueError(
+            "Mesh data grid is not latitude-major: longitude varies down a column. "
+            "grid_lat_lon must be flattened as node = lat_index * width + lon_index."
+        )
+    return lats, lons
+
+
+def expected_healpix_mesh_metadata(
+    *,
+    nside: int,
+    num_graph_levels: int,
+    grid_shape: tuple[int, int],
+    grid_lat_lon: np.ndarray | torch.Tensor,
+    resolution_mode: str | None,
+    regrid_oversample: int,
+    bipartite_edge_features: str = LEGACY_BIPARTITE_EDGE_FEATURES,
+    level_k_neighbors: list[int] | tuple[int, ...] | None = None,
+    grid_attention_k_neighbors: int | None = None,
+    grid_attention_connectivity_strategy: str = "hybrid_row_aware_knn",
+    grid_attention_row_aware_knn: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Cache identity for a HEALPix mesh bundle.
+
+    Deliberately mirrors ``expected_mesh_metadata``'s validated keys so the same
+    ``validate_mesh_cache_metadata`` works. ``refinement`` is None (there is no
+    icosphere refinement) and ``mesh_format_version`` is a HEALPix-specific
+    string, so an icosphere cache and a HEALPix cache can never satisfy each
+    other's expectation in either direction.
+    """
+    grid_ll = torch.as_tensor(grid_lat_lon, dtype=torch.float32).reshape(-1, 2)
+    grid_attention_enabled = grid_attention_k_neighbors is not None
+    expected: dict[str, Any] = {
+        "graph_mode": "mesh",
+        "mesh_format_version": HEALPIX_MESH_FORMAT_VERSION,
+        "mesh_hierarchy": "healpix",
+        "nside": int(nside),
+        "ordering": "nest",
+        "regrid_oversample": int(regrid_oversample),
+        "resolution_mode": resolution_mode,
+        # No icosphere refinement / radius rule on this path.
+        "refinement": None,
+        "g2m_radius_factor": None,
+        "num_graph_levels": int(num_graph_levels),
+        "level_k_neighbors": (
+            [_HEALPIX_K] * int(num_graph_levels)
+            if level_k_neighbors is None
+            else [int(x) for x in level_k_neighbors]
+        ),
+        "grid_shape": [int(grid_shape[0]), int(grid_shape[1])],
+        "grid_coordinate_hash": coordinate_hash_from_lat_lon(grid_ll),
+        "bipartite_mapping_type": HEALPIX_CONSERVATIVE_MAPPING,
+        "coarse_level_connectivity": NATIVE_HEALPIX_CONNECTIVITY,
+        "bipartite_edge_features": str(bipartite_edge_features),
+        "bipartite_edge_dim": bipartite_edge_feature_dim(bipartite_edge_features),
+        "grid_attention_graph": bool(grid_attention_enabled),
+        # Same three keys validate_mesh_cache_metadata checks for any fixed
+        # mapping; different values, so the barycentric and conservative weight
+        # sets are distinguishable in a cache.
+        "fixed_spherical_method": HEALPIX_CONSERVATIVE_METHOD,
+        "fixed_spherical_pole_handling": HEALPIX_CONSERVATIVE_POLE_HANDLING,
+        "fixed_spherical_channel_policy": "shared_weights_no_channel_mixing",
+    }
+    if grid_attention_enabled:
+        # Mirrors expected_mesh_metadata so one bundle cannot satisfy another's
+        # expectation across a change of k or connectivity strategy.
+        expected.update(
+            {
+                "grid_attention_k_neighbors": int(grid_attention_k_neighbors),
+                "grid_attention_connectivity_strategy": normalize_connectivity_strategy(
+                    grid_attention_connectivity_strategy
+                ),
+                "grid_attention_row_aware_knn": normalize_row_aware_config(
+                    grid_attention_row_aware_knn
+                ),
+            }
+        )
+    return expected
+
+
+def build_healpix_mesh_bundle(
+    nside: int,
+    num_graph_levels: int,
+    grid_shape: tuple[int, int],
+    grid_lat_lon: np.ndarray | torch.Tensor | None = None,
+    resolution_mode: str | None = None,
+    regrid_oversample: int = 8,
+    regrid_cache_dir: str = "data/stats",
+    bipartite_edge_features: str = LEGACY_BIPARTITE_EDGE_FEATURES,
+    level_k_neighbors: list[int] | tuple[int, ...] | None = None,
+    grid_attention_k_neighbors: int | None = None,
+    grid_attention_connectivity_strategy: str = "hybrid_row_aware_knn",
+    grid_attention_row_aware_knn: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Mesh bundle whose mesh is a HEALPix map and whose boundary is a regrid.
+
+    The data grid stays lat-lon: ``grid`` holds the ``H x W`` nodes the
+    GridNodeAdapter produces, and ``g2m``/``m2g`` carry the conservative
+    area-weighted interpolation weights that move features onto the HEALPix mesh
+    and back. Because the round trip happens INSIDE the model, everything outside
+    it -- delta statistics, the latitude-weighted loss, the evaluator -- keeps
+    operating on the lat-lon grid unchanged.
+
+    ``num_graph_levels`` HEALPix levels coarsen by a factor of two in nside
+    (four in pixel count); the pool maps are the NEST quadtree ``p >> 2``.
+
+    ``level_k_neighbors`` defaults to 8 everywhere (true HEALPix adjacency). A
+    level asking for more than 8 is built with spherical kNN instead, which is how
+    a densified coarsest level stays reachable -- native adjacency has exactly 8
+    slots and cannot express k=24.
+    """
+    from .graph_builder import healpix_pool_map, validate_pool_map
+    from .healpix_regrid import load_or_build_operators, sparse_to_bipartite_edges
+    from .resolution import healpix_level_nsides, healpix_npix
+
+    nside = int(nside)
+    levels_count = int(num_graph_levels)
+    if levels_count < 3 or levels_count > 5:
+        raise ValueError(f"num_graph_levels must be 3, 4, or 5; got {levels_count}.")
+    height, width = int(grid_shape[0]), int(grid_shape[1])
+    if width < 2:
+        raise ValueError(
+            f"A HEALPix mesh regrids from a real lat-lon grid, but grid_shape={grid_shape} "
+            "has width < 2. This path expects the lat-lon data grid; for HEALPix data "
+            "on disk use resolution_mode='hpx32' instead."
+        )
+
+    sides = healpix_level_nsides(nside, levels_count)
+    if level_k_neighbors is None:
+        level_k = [_HEALPIX_K] * levels_count
+    else:
+        level_k = [int(x) for x in level_k_neighbors]
+        if len(level_k) != levels_count:
+            raise ValueError(
+                f"level_k_neighbors must have length num_graph_levels={levels_count}; "
+                f"got {len(level_k)}."
+            )
+    levels: dict[str, Any] = {}
+    pool: dict[str, Any] = {}
+    node_counts: list[int] = []
+    level_strategies: dict[str, str] = {}
+    for idx, side in enumerate(sides):
+        name = f"L{idx}"
+        k_level = level_k[idx]
+        if k_level == _HEALPIX_K:
+            levels[name] = _healpix_mesh_level_dict(side)
+            level_strategies[name] = NATIVE_HEALPIX_CONNECTIVITY
+        elif k_level > _HEALPIX_K:
+            # Deliberately densified level: native adjacency has only 8 slots, so
+            # reach beyond it has to come from spherical kNN over the pixel centers.
+            lat_lon = _healpix_mesh_level_dict(side)["lat_lon"]
+            coords = torch.from_numpy(_latlon_to_xyz(lat_lon.numpy()).astype(np.float32))
+            levels[name] = make_level(
+                coords,
+                lat_lon,
+                0,
+                0,
+                k_level,
+                connectivity_strategy="pure_spherical_knn",
+                row_aware_knn=None,
+            )
+            level_strategies[name] = "pure_spherical_knn"
+        else:
+            raise ValueError(
+                f"level_k_neighbors[{idx}]={k_level} is below the HEALPix mesh degree of "
+                f"{_HEALPIX_K}; use {_HEALPIX_K} for true adjacency or more to densify."
+            )
+        node_counts.append(int(levels[name]["num_nodes"]))
+        if idx > 0:
+            fine_npix = healpix_npix(sides[idx - 1])
+            coarse_npix = healpix_npix(side)
+            pool_map = healpix_pool_map(fine_npix)
+            validate_pool_map(pool_map, fine_npix, coarse_npix)
+            pool[f"L{idx - 1}_to_L{idx}"] = pool_map
+
+    if grid_lat_lon is None:
+        grid_ll = _grid_latlon(height, width)
+    else:
+        grid_ll = (
+            grid_lat_lon.detach().cpu().numpy()
+            if isinstance(grid_lat_lon, torch.Tensor)
+            else np.asarray(grid_lat_lon)
+        ).astype(np.float32)
+        if grid_ll.shape != (height * width, 2):
+            raise ValueError(f"grid_lat_lon must be [{height * width}, 2], got {grid_ll.shape}.")
+    if not np.isfinite(grid_ll).all():
+        raise ValueError("grid_lat_lon contains non-finite values.")
+    grid_xyz = _latlon_to_xyz(grid_ll)
+
+    # Optional message-passing level ON the lat-lon grid, so the model can run
+    # attention blocks before the grid->mesh regrid and after the mesh->grid one.
+    # Built exactly like the icosphere path's grid attention level (same kNN over
+    # the same grid nodes), so the two mesh families stay comparable.
+    grid_attention_level = None
+    if grid_attention_k_neighbors is not None:
+        grid_attention_level = make_level(
+            torch.from_numpy(grid_xyz.astype(np.float32)),
+            torch.from_numpy(grid_ll),
+            height,
+            width,
+            int(grid_attention_k_neighbors),
+            connectivity_strategy=grid_attention_connectivity_strategy,
+            row_aware_knn=grid_attention_row_aware_knn,
+        )
+
+    # The mesh is L0 (the finest HEALPix level); the boundary connects it to the grid.
+    mesh_ll = levels["L0"]["lat_lon"].numpy()
+    lats_deg, lons_deg = _grid_axes_from_lat_lon(grid_ll, (height, width))
+    w_fwd, w_bwd = load_or_build_operators(
+        height,
+        width,
+        nside,
+        oversample=int(regrid_oversample),
+        cache_dir=regrid_cache_dir,
+        lats=lats_deg,
+        lons=lons_deg,
+    )
+    if w_fwd.shape != (healpix_npix(nside), height * width):
+        raise RuntimeError(
+            f"grid->mesh operator has shape {w_fwd.shape}, expected "
+            f"{(healpix_npix(nside), height * width)}."
+        )
+    # W_fwd rows are mesh pixels (destinations), columns are grid cells (sources).
+    g2m_ei, g2m_weight = sparse_to_bipartite_edges(w_fwd)
+    # W_bwd rows are grid cells, columns are mesh pixels -- the other direction.
+    m2g_ei, m2g_weight = sparse_to_bipartite_edges(w_bwd)
+    g2m_ea = _bipartite_edge_attr(
+        grid_ll,
+        mesh_ll,
+        g2m_ei,
+        feature_set=bipartite_edge_features,
+    )
+    m2g_ea = _bipartite_edge_attr(
+        mesh_ll,
+        grid_ll,
+        m2g_ei,
+        feature_set=bipartite_edge_features,
+    )
+
+    mesh_static = np.stack(
+        [
+            np.sin(mesh_ll[:, 0]),
+            np.cos(mesh_ll[:, 0]),
+            np.sin(mesh_ll[:, 1]),
+            np.cos(mesh_ll[:, 1]),
+        ],
+        axis=1,
+    ).astype(np.float32)
+
+    grid_ll_tensor = torch.from_numpy(grid_ll)
+    metadata = expected_healpix_mesh_metadata(
+        nside=nside,
+        num_graph_levels=levels_count,
+        grid_shape=(height, width),
+        grid_lat_lon=grid_ll_tensor,
+        resolution_mode=resolution_mode,
+        regrid_oversample=int(regrid_oversample),
+        bipartite_edge_features=bipartite_edge_features,
+        level_k_neighbors=level_k,
+        grid_attention_k_neighbors=grid_attention_k_neighbors,
+        grid_attention_connectivity_strategy=grid_attention_connectivity_strategy,
+        grid_attention_row_aware_knn=grid_attention_row_aware_knn,
+    )
+    metadata.update(
+        {
+            "hierarchy_type": "healpix",
+            "use_l3": levels_count >= 4,
+            "use_l4": levels_count >= 5,
+            "mesh_static_dim": int(mesh_static.shape[1]),
+            "node_counts": node_counts,
+            "edge_counts": [int(levels[f"L{i}"]["edge_index"].shape[1]) for i in range(levels_count)],
+            "level_nsides": [int(side) for side in sides],
+            "graph_k": _HEALPIX_K,
+            "k": _HEALPIX_K,
+            "k_neighbors": _HEALPIX_K,
+            "level_k_neighbors": list(level_k),
+            "connectivity_strategy": NATIVE_HEALPIX_CONNECTIVITY,
+            "graph_connectivity_strategy": NATIVE_HEALPIX_CONNECTIVITY,
+            "level_connectivity_strategies": dict(level_strategies),
+            "pooling_map_strategy": "nest_quadtree",
+            "g2m_edge_count": int(g2m_ei.shape[1]),
+            "m2g_edge_count": int(m2g_ei.shape[1]),
+            # Only native-adjacency levels have a mask; a densified kNN level has none.
+            "masked_edge_slots": [
+                int((~levels[f"L{i}"]["edge_mask"].numpy()).sum())
+                if "edge_mask" in levels[f"L{i}"]
+                else 0
+                for i in range(levels_count)
+            ],
+        }
+    )
+    if grid_attention_level is not None:
+        metadata["grid_attention_edge_count"] = int(
+            grid_attention_level["edge_index"].shape[1]
+        )
+    grid_bundle: dict[str, Any] = {
+        "lat_lon": grid_ll_tensor,
+        "coords": torch.from_numpy(grid_xyz.astype(np.float32)),
+        "height": height,
+        "width": width,
+    }
+    if grid_attention_level is not None:
+        grid_bundle["attention_level"] = grid_attention_level
+    return {
+        "levels": levels,
+        "pool": pool,
+        "grid": grid_bundle,
+        "g2m": {
+            "edge_index": torch.from_numpy(g2m_ei),
+            "edge_attr": torch.from_numpy(g2m_ea),
+            "edge_weight": torch.from_numpy(g2m_weight),
+        },
+        "m2g": {
+            "edge_index": torch.from_numpy(m2g_ei),
+            "edge_attr": torch.from_numpy(m2g_ea),
+            "edge_weight": torch.from_numpy(m2g_weight),
+        },
+        "mesh_static": torch.from_numpy(mesh_static),
+        "metadata": metadata,
+    }
+
+
+def build_and_save_healpix(path: str, **kwargs: Any) -> dict[str, Any]:
+    bundle = build_healpix_mesh_bundle(**kwargs)
     Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     torch.save(bundle, path)
     return bundle["metadata"]

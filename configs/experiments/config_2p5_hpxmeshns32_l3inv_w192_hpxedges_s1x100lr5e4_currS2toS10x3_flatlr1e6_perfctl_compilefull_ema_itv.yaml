@@ -1,0 +1,570 @@
+# HEALPix nside-32 mesh + INVERTED channels 192 / 96 / 48 / 24, + itv, + EMA.
+# S1 x100 @ peak 5.0e-4 -> 2.5e-5, then S2..S10 x3 @ flat 1.0e-6. 127 epochs, batch 12.
+#
+# This is config_2p5_hpxmeshns32_l3_h192_hpxedges_..._ema_itv.yaml with ONE change:
+#   level_dims  (absent -> uniform 192) -> [192, 96, 48, 24]
+#   level_heads (absent -> uniform 6)   -> [6, 6, 6, 6]
+# The grid->HEALPix path is untouched: mesh_encoder.boundary_type stays fixed_spherical,
+# i.e. src/models.py:391 builds FixedBipartiteRemap for BOTH directions -- a fixed,
+# parameter-free conservative interpolation. No BipartiteMP, no learned message passing
+# across the grid<->mesh boundary. Graph cache, itv, EMA, curriculum, LR table, substrate
+# and every other field are identical to the flat-192 HEALPix run, so the pair isolates
+# the inverted channels exactly.
+#
+# HOW IT COMPOSES: grid features are embedded at 192, interpolated onto the HEALPix L0
+# mesh at 192, and only then does the U-Net taper 192 -> 96 -> 48 -> 24 as the mesh
+# coarsens, widening back on the way up before being interpolated home. Because
+# FixedBipartiteRemap is channel-independent, the interpolation is unaffected by the
+# taper -- it carries whatever width L0 holds.
+#
+# REQUIRES a one-line relaxation in src/models.py (this branch): the mesh guard used to
+# demand every level equal hidden_dim, which blocked tapered widths on mesh graphs for no
+# architectural reason -- GraphUNetProcessor already projects between differing widths via
+# MeanMaxPool(out_dim=...) and ParentUnpoolFuse(coarse_dim=...). The guard now checks only
+# level_dims[0] == hidden_dim, which is the real constraint (the transfer lands on L0).
+# Uniform-width mesh configs are unaffected.
+#
+# HEADS: 192/96/48/24 are all divisible by 6, giving per-level head_dim 32/16/8/4 --
+# the same pattern as the dense-grid inverted configs.
+#
+# SCORING: itv reweights the objective, so valid_* compares only to other *_itv runs.
+# Rank on evaluation RMSE/ACC, read all-65 median AND mean together, and check sp.
+2p5_hpxmeshns32_l3inv_w192_hpxedges_s1x100lr5e4_currS2toS10x3_flatlr1e6_perfctl_compilefull_ema_itv:
+  lr: 0.0005
+  min_lr: 2.5e-05
+  weight_decay: 0.0001
+  scheduler: CosineAnnealingLR
+  max_epochs: 127
+  max_train_batches: null
+  max_valid_batches: null
+  batch_size: 12
+  gradient_accumulation_steps: 1
+  num_data_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  enable_amp: true
+  amp_dtype: auto_bf16_fp16
+  max_gradient_norm: 0.5
+  log_cuda_memory: true
+  experiment_name: 2p5_hpxmeshns32_l3inv_w192_hpxedges_s1x100lr5e4_currS2toS10x3_flatlr1e6_perfctl_compilefull_ema_itv
+  run_name: 2p5_hpxmeshns32_l3inv_w192_hpxedges_s1x100lr5e4_currS2toS10x3_flatlr1e6_perfctl_compilefull_ema_itv
+  resolution_mode: 2p5
+  nettype: graph_weather
+  target: default
+  auto_build_graph: true
+  hidden_dim: 192
+  edge_dim: 6
+  num_heads: 6
+  k_neighbors: 8
+  level_k_neighbors:
+  - 8
+  - 8
+  - 8
+  - 8
+  graph_connectivity_strategy: hybrid_row_aware_knn
+  row_aware_knn:
+    enabled: true
+    interior_neighbors_from_north_row: 1
+    interior_neighbors_from_south_row: 1
+    polar_neighbors_from_adjacent_row: 2
+  mesh_encoder: &id001
+    enabled: true
+    mesh_type: healpix
+    nside: 32
+    boundary_type: fixed_spherical
+    regrid_oversample: 8
+    grid_skip_mlp: false
+    grid_attention_encoder_blocks: 0
+    grid_attention_decoder_blocks: 0
+  encoder_blocks: 1
+  decoder_blocks: 1
+  skip_fusion:
+    type: default
+    init_scale: 1.0
+    max_scale: 2.0
+  lead_conditioning:
+    enabled: false
+    type: none
+    max_lead: 0
+    added_input_channels: 0
+  model:
+    input_channels: 134
+    output_channels: 67
+    hidden_dim: 192
+    num_heads: 6
+    k_neighbors: 8
+    level_k_neighbors:
+    - 8
+    - 8
+    - 8
+    - 8
+    use_l3: true
+    num_graph_levels: 4
+    l0_blocks: 2
+    l1_blocks: 2
+    l2_blocks: 1
+    l3_blocks: 1
+    l2_refine_after_l3_blocks: 1
+    l1_refine_blocks: 1
+    l0_refine_blocks: 1
+    skip_fusion:
+      type: default
+      init_scale: 1.0
+      max_scale: 2.0
+    lead_conditioning:
+      enabled: false
+      type: none
+      max_lead: 0
+      added_input_channels: 0
+    hierarchy_type: standard
+    mesh_encoder: *id001
+    use_l4_ratio15: false
+    head_dim: 32
+    pooling:
+      type: default
+      init_scale: 1.0
+      max_scale: 2.0
+      mean_type: mean
+      include_max: true
+    use_l4: false
+    l4_blocks: 1
+    l3_refine_after_l4_blocks: 1
+    level_dims:
+    - 192
+    - 96
+    - 48
+    - 24
+    level_heads:
+    - 6
+    - 6
+    - 6
+    - 6
+  graph_gradient_weight: 0.0
+  dt: 1
+  n_history: 1
+  max_rollout_steps: 10
+  rollout_schedule:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  rollout_stage_epochs:
+  - 100
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  - 3
+  valid_rollout_steps: 10
+  validate_with_train_rollout: false
+  eval_rollout_steps:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  trainable_scope: all
+  checkpoint_metric: valid_S10_final
+  checkpoint_mode: min
+  stage_checkpoint_metric_mode: final_horizon
+  load_only_current_rollout: true
+  single_pass_multi_horizon_validation: true
+  training:
+    rollout_mode: curriculum
+    load_only_current_rollout: true
+    random_rollout:
+      min_horizon: 1
+      max_horizon: 1
+      distribution: uniform_integer
+      loss_type: all_steps_mean
+      final_step_weight: 0.0
+      detach_between_steps: false
+    fixed_train_rollout_steps: 1
+    rollout_loss_weights: uniform
+    activation_checkpointing: false
+    checkpoint_rollout_steps: false
+    edge_projection_cache: true
+    attention_impl: elementwise
+    scheduled_rollout:
+      phases: []
+  lr_schedule_type: rollout_stage_warmup_cosine
+  warmup_epochs: 8
+  warmup_start_factor: 0.1
+  rollout_stage_lr_schedule:
+  - rollout_steps: 1
+    max_lr: 0.0005
+    min_lr: 2.5e-05
+    warmup_epochs: 8
+    warmup_start_factor: 0.1
+  - rollout_steps: 2
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 3
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 4
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 5
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 6
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 7
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 8
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 9
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  - rollout_steps: 10
+    max_lr: 1.0e-06
+    min_lr: 1.0e-06
+    warmup_epochs: 0
+    warmup_start_factor: 1.0
+  use_delta_normalization: true
+  delta_stats_path: data/stats/era5_67_2p5_delta_stats.npz
+  recompute_delta_stats: false
+  delta_norm_center: false
+  delta_norm_eps: 1.0e-06
+  in_channels: &id002
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
+  - 36
+  - 37
+  - 38
+  - 39
+  - 40
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+  - 46
+  - 47
+  - 48
+  - 49
+  - 50
+  - 51
+  - 52
+  - 53
+  - 54
+  - 55
+  - 56
+  - 57
+  - 58
+  - 59
+  - 60
+  - 61
+  - 62
+  - 63
+  - 64
+  - 65
+  - 66
+  out_channels: *id002
+  normalization: zscore
+  add_grid: false
+  N_grid_channels: 0
+  gridtype: sinusoidal
+  add_noise: false
+  noise_std: 0.0
+  crop_size_x: null
+  crop_size_y: null
+  roll: false
+  orography: false
+  orography_path: null
+  require_static_features: false
+  extra_features:
+    enabled: false
+    spatial:
+      lat_lon_sincos: false
+      orography: false
+      land_sea_mask: false
+    temporal:
+      dayofyear_sincos: false
+      use_target_time: true
+    known_forcings:
+      enabled: false
+      variables: []
+    static_handling:
+      copy_variables: []
+      exclude_loss_variables: []
+      override_prediction_with_known: []
+  target_handling:
+    enabled: true
+    copy_variables:
+    - orog
+    known_future_variables:
+    - tisr
+    exclude_loss_variables:
+    - orog
+    - tisr
+  static_fields:
+    path: null
+    orography_name: orog
+    land_sea_mask_name: lsm
+  variable_metadata:
+    path: null
+  resolution_profiles:
+    2p5:
+      resolution_degrees: 2.5
+      grid_shape:
+      - 72
+      - 144
+      level_shapes:
+      - - 72
+        - 144
+      - - 36
+        - 72
+      - - 18
+        - 36
+      - - 9
+        - 18
+      train_data_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/train
+      valid_data_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/val
+      test_dataset_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/test
+      graph_path: graphs/graph_2p5_healpix_ns32_l3.pt
+      global_means_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/stats/global_mean.npy
+      global_stds_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/stats/global_std.npy
+      delta_stats_path: data/stats/era5_67_2p5_delta_stats.npz
+      batch_size: 12
+      gradient_accumulation_steps: 1
+      max_gradient_norm: 0.5
+      enable_amp: true
+  exp_dir: runs
+  eval_checkpoint_path: null
+  eval_output_dir: null
+  eval_forecast_steps:
+  - 10
+  eval_fixed_rollout_steps: 10
+  eval_compare_stage_checkpoints: false
+  eval_stage_checkpoints:
+    1: best_ckpt_S1.tar
+    2: best_ckpt_S2.tar
+    4: best_ckpt_S4.tar
+    6: best_ckpt_S6.tar
+    8: best_ckpt_S8.tar
+    10: best_ckpt_S10.tar
+  eval_global_best_checkpoint: best_ckpt.tar
+  eval_start_timestep: 1
+  eval_ic_stride: 1
+  n_initial_conditions: 5
+  climatology_path: null
+  compute_climatology: true
+  climatology_chunk_size: 128
+  eval_device: cuda
+  eval_plot_variables:
+  - z500
+  - t2m
+  - t850
+  - msl
+  - q700
+  - u850
+  eval_plot_format: png
+  plot_persistence: true
+  save_checkpoint: true
+  resume: true
+  diagnostics:
+    enabled: true
+    baseline_compare:
+      enabled: false
+      baseline_name: null
+      baseline_rollout_curve_csv: null
+      baseline_scalars_json: null
+  wandb:
+    enabled: true
+    project: GraphWeather5p625
+    entity: amin1jafarzade-kaist
+    run_name: 2p5_hpxmeshns32_l3inv_w192_hpxedges_s1x100lr5e4_currS2toS10x3_flatlr1e6_perfctl_compilefull_ema_itv
+    tags:
+    - 2p5
+    - l3
+    - hidden192
+    - dense_l3k24
+    - plain
+    - perfctl
+    - ema
+    - compile_full
+    - currS2toS10x3
+    - lr_min_peak_over_20
+    - flat_lr1e6_horizons
+    - rollout_stage_warmup_cosine
+    - lossw_itv
+    - graphcast_sj
+    - healpix_mesh
+    - hpx_nside32
+    - conservative_regrid_raw_remap
+    - hpx_native_edges
+    - s1x100
+    - lr5e4_peak
+    - level_dims_inverted
+    - l3inv_w192
+  resolution_degrees: 2.5
+  grid_shape:
+  - 72
+  - 144
+  level_shapes:
+  - - 72
+    - 144
+  - - 36
+    - 72
+  - - 18
+    - 36
+  - - 9
+    - 18
+  train_data_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/train
+  valid_data_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/val
+  test_dataset_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/test
+  graph_path: graphs/graph_2p5_healpix_ns32_l3.pt
+  global_means_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/stats/global_mean.npy
+  global_stds_path: ${GW_DATA_ROOT:-/home/amin/ERA_5_2p5}/era5_67/stats/global_std.npy
+  hierarchy_type: standard
+  use_l4_ratio15: false
+  resolution: 2.5
+  expected_grid_shape:
+  - 72
+  - 144
+  node_counts:
+  - 12288
+  - 3072
+  - 768
+  - 192
+  edge_counts:
+  - 98304
+  - 24576
+  - 6144
+  - 1536
+  graph_format_version: 3
+  mesh_format_version: hpx_mesh_v1
+  l3_k_neighbors: 8
+  input_channels: 134
+  output_channels: 67
+  use_l3: true
+  num_graph_levels: 4
+  l0_blocks: 2
+  l1_blocks: 2
+  l2_blocks: 1
+  l3_blocks: 1
+  l2_refine_after_l3_blocks: 1
+  l1_refine_blocks: 1
+  l0_refine_blocks: 1
+  head_dim: 32
+  pooling:
+    type: default
+    init_scale: 1.0
+    max_scale: 2.0
+    mean_type: mean
+    include_max: true
+  use_l4: false
+  l4_blocks: 1
+  l3_refine_after_l4_blocks: 1
+  rollout_mode: curriculum
+  fixed_train_rollout_steps: 1
+  rollout_loss_weights: uniform
+  activation_checkpointing: false
+  checkpoint_rollout_steps: false
+  edge_projection_cache: true
+  attention_impl: elementwise
+  compile_scope: full
+  compile_processor_mode: default
+  ema:
+    enabled: true
+    decay: 0.999
+  random_rollout:
+    min_horizon: 1
+    max_horizon: 1
+    distribution: uniform_integer
+    loss_type: all_steps_mean
+    final_step_weight: 0.0
+    detach_between_steps: false
+  scheduled_rollout:
+    phases: []
+  device: cuda:0
+  name: 2p5_hpxmeshns32_l3inv_w192_hpxedges_s1x100lr5e4_currS2toS10x3_flatlr1e6_perfctl_compilefull_ema_itv
+  log_every_batches: 100
+  loss_channel_weighting:
+    enabled: true
+    pressure_weighting: false
+    inverse_tendency_variance: true
+    itv_exponent: 1.0
+    itv_min_std: 0.01
+    variable_upweights: {}
+  level_dims:
+  - 192
+  - 96
+  - 48
+  - 24
+  level_heads:
+  - 6
+  - 6
+  - 6
+  - 6

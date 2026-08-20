@@ -43,6 +43,13 @@ class DataConfig:
     resolution_mode: str = "5p625"
     expected_grid_shape: Optional[Sequence[int]] = None
     return_metadata: bool = False
+    # "latlon" (default, unchanged behaviour) or "healpix". HEALPix files store
+    # fields as [T, C, npix]; the loader adds a trailing axis so everything
+    # downstream sees the usual [T, C, H, W] with H = npix and W = 1.
+    grid_kind: str = "latlon"
+    # (npix, 2) pixel centers in radians, only needed when add_grid is enabled on
+    # a HEALPix run (the linspace synthesis is meaningless at W = 1).
+    pixel_lat_lon: Optional[np.ndarray] = None
 
 
 def _load_netcdf4():
@@ -150,13 +157,71 @@ def _apply_normalization(
     raise ValueError(f"Unexpected image ndim: {img.ndim}")
 
 
-def _add_grid_channels(img: np.ndarray, gridtype: str, n_grid_channels: int) -> np.ndarray:
+def _is_healpix(config: "DataConfig") -> bool:
+    return str(getattr(config, "grid_kind", "latlon")).strip().lower() == "healpix"
+
+
+def _reject_latlon_only_transforms(config: "DataConfig") -> None:
+    """Transforms whose meaning depends on a 2-D lat-lon layout.
+
+    A longitude roll or an (x, y) crop over a (npix, 1) HEALPix map is not a
+    rotation or a window -- it reindexes pixels arbitrarily across face
+    boundaries. Fail loudly rather than train on scrambled geometry.
+    """
+    if config.roll:
+        raise ValueError(
+            "roll=true rolls along the longitude axis, which does not exist on a "
+            "HEALPix map carried as (npix, 1). Set roll: false for hpx runs."
+        )
+    if config.crop_size_x or config.crop_size_y:
+        raise ValueError(
+            "crop_size_x/crop_size_y crop a 2-D lat-lon window; on a (npix, 1) "
+            "HEALPix map they would slice an arbitrary pixel range. Set both null."
+        )
+    if config.add_grid and config.pixel_lat_lon is None:
+        raise ValueError(
+            "add_grid=true on a HEALPix run needs DataConfig.pixel_lat_lon "
+            "(npix, 2) pixel centers in radians; the linspace fallback is invalid at W=1."
+        )
+
+
+def _add_grid_channels(
+    img: np.ndarray,
+    gridtype: str,
+    n_grid_channels: int,
+    pixel_lat_lon: Optional[np.ndarray] = None,
+) -> np.ndarray:
     add_time = False
     if img.ndim == 3:
         img = img[None, ...]
         add_time = True
 
     _, _, height, width = img.shape
+    if pixel_lat_lon is not None:
+        # HEALPix: the linspace sweep below encodes GRID INDEX position, which is
+        # meaningless at (npix, 1) -- it would hand the model 12288 fake latitudes
+        # and a single longitude. Use the real pixel centers instead.
+        lat_rad = np.asarray(pixel_lat_lon, dtype=np.float32)[:, 0]
+        lon_rad = np.asarray(pixel_lat_lon, dtype=np.float32)[:, 1]
+        if lat_rad.size != height:
+            raise ValueError(
+                f"pixel_lat_lon has {lat_rad.size} rows but the field has {height} nodes."
+            )
+        if gridtype == "linear":
+            if n_grid_channels != 2:
+                raise ValueError("linear grid requires N_grid_channels=2")
+            channels = [lat_rad / (math.pi / 2.0), lon_rad / math.pi - 1.0]
+        elif gridtype == "sinusoidal":
+            if n_grid_channels != 4:
+                raise ValueError("sinusoidal grid requires N_grid_channels=4")
+            channels = [np.sin(lat_rad), np.cos(lat_rad), np.sin(lon_rad), np.cos(lon_rad)]
+        else:
+            raise ValueError(f"Unknown grid type '{gridtype}'")
+        grid = np.stack([c.reshape(height, 1).astype(np.float32) for c in channels], axis=0)
+        grid = np.repeat(grid[None, ...], img.shape[0], axis=0)
+        out = np.concatenate([img, grid], axis=1)
+        return out[0] if add_time else out
+
     if gridtype == "linear":
         if n_grid_channels != 2:
             raise ValueError("linear grid requires N_grid_channels=2")
@@ -212,7 +277,12 @@ def _reshape_fields(
     )
 
     if inp_or_tar == "inp" and config.add_grid:
-        img = _add_grid_channels(img, config.gridtype, config.N_grid_channels)
+        img = _add_grid_channels(
+            img,
+            config.gridtype,
+            config.N_grid_channels,
+            pixel_lat_lon=(config.pixel_lat_lon if _is_healpix(config) else None),
+        )
 
     if inp_or_tar == "inp" and config.orography:
         if orog is None:
@@ -257,6 +327,8 @@ class ClimateNetCDFDataset(Dataset):
         self.nc = _load_netcdf4()
         self.in_channels = np.asarray(config.in_channels, dtype=np.int64)
         self.out_channels = np.asarray(config.out_channels, dtype=np.int64)
+        if _is_healpix(config):
+            _reject_latlon_only_transforms(config)
 
         self.means: Optional[np.ndarray] = None
         self.stds: Optional[np.ndarray] = None
@@ -280,8 +352,30 @@ class ClimateNetCDFDataset(Dataset):
         if not self.files_paths:
             raise FileNotFoundError(f"No .nc files found under {data_dir}")
         self._discover_shapes()
+        self._normalize_static_field_shapes()
         self._discover_channel_names_and_times()
         self._build_index()
+
+    def _normalize_static_field_shapes(self) -> None:
+        """Give a HEALPix static field the trailing axis the fields path has.
+
+        Static NetCDFs are read with .squeeze(), which turns a (npix, 1) HEALPix
+        orography into (npix,). _reshape_fields compares it against
+        img.shape[-2:] == (npix, 1), so without this the field is rejected.
+        """
+        if not _is_healpix(self.config) or self.orography_field is None:
+            return
+        field = self.orography_field
+        expected = (int(self.img_shape_x), int(self.img_shape_y))
+        if field.shape == expected:
+            return
+        if field.ndim == 1 and int(field.size) == expected[0]:
+            self.orography_field = field.reshape(expected)
+            return
+        raise ValueError(
+            f"HEALPix orography has shape {field.shape}; expected ({expected[0]},) or "
+            f"{expected}. Regrid it with scripts/regrid_latlon_healpix.py --to-hpx."
+        )
 
     def output_normalization_vectors(self) -> tuple[np.ndarray, np.ndarray]:
         if self.means is None or self.stds is None:
@@ -292,16 +386,53 @@ class ClimateNetCDFDataset(Dataset):
         self._file_lengths: list[int] = []
         self.img_shape_x: Optional[int] = None
         self.img_shape_y: Optional[int] = None
+        self._fields_ndim: Optional[int] = None
         for path in self.files_paths:
             with self.nc.Dataset(path, "r") as ds:
                 if "fields" not in ds.variables:
                     raise KeyError(f"{path} has no 'fields' variable")
-                time_len, _, height, width = ds["fields"].shape
+                shape = tuple(int(x) for x in ds["fields"].shape)
+                grid_attr = str(getattr(ds, "grid", "") or "").strip().lower()
+                if len(shape) == 3:
+                    # HEALPix map: [T, C, npix]. Presented downstream as a
+                    # degenerate (npix, 1) grid, so every [B, C, H, W] reshape,
+                    # the GridNodeAdapter and the normalization broadcast all keep
+                    # working with no changes.
+                    time_len, _, npix = shape
+                    height, width = npix, 1
+                    file_kind = "healpix"
+                elif len(shape) == 4:
+                    time_len, _, height, width = shape
+                    file_kind = "healpix" if grid_attr == "healpix" else "latlon"
+                else:
+                    raise ValueError(
+                        f"{path}: 'fields' must be [T, C, H, W] (lat-lon) or "
+                        f"[T, C, npix] (HEALPix), got shape {shape}."
+                    )
+                # Only the exact attribute "healpix" opts a 4-D file into the
+                # HEALPix path. Anything else -- absent, "latlon", "regular_ll",
+                # a CF grid_mapping name -- stays lat-lon, so existing datasets
+                # with their own grid attribute are unaffected.
+                if self._fields_ndim is None:
+                    self._fields_ndim = len(shape)
+                elif len(shape) != self._fields_ndim:
+                    raise ValueError(
+                        f"{path}: 'fields' has {len(shape)} dims but earlier files had "
+                        f"{self._fields_ndim}; do not mix lat-lon and HEALPix data."
+                    )
+                configured = str(getattr(self.config, "grid_kind", "latlon")).strip().lower()
+                if file_kind != configured:
+                    raise ValueError(
+                        f"{path} is a {file_kind} dataset but the config declares "
+                        f"grid_kind={configured!r} (resolution_mode="
+                        f"{self.config.resolution_mode!r}). Point at the matching data."
+                    )
                 self._file_lengths.append(int(time_len))
                 if self.img_shape_x is None:
                     self.img_shape_x = int(height)
                     self.img_shape_y = int(width)
-                    self._warn_coordinate_issues(ds, int(height), int(width), path)
+                    if file_kind != "healpix":
+                        self._warn_coordinate_issues(ds, int(height), int(width), path)
                 elif (height, width) != (self.img_shape_x, self.img_shape_y):
                     raise ValueError(f"Inconsistent grid in {path}: {(height, width)}")
         expected = self.config.expected_grid_shape
@@ -435,12 +566,18 @@ class ClimateNetCDFDataset(Dataset):
             input_start = center_idx - dt * n_history
             input_stop = center_idx + 1
             input_time_indices = list(range(input_start, input_stop, dt))
-            inp_seq = np.asarray(
-                fields[input_start:input_stop:dt, :, :, :],
-                dtype=np.float32,
-            )
             target_times = [center_idx + dt * step for step in range(1, rollout_steps + 1)]
-            tar_seq = np.asarray(fields[target_times, :, :, :], dtype=np.float32)
+            if getattr(self, "_fields_ndim", 4) == 3:
+                # [T, C, npix] -> [T, C, npix, 1]; the trailing axis is what lets
+                # the rest of the pipeline stay lat-lon shaped.
+                inp_seq = np.asarray(fields[input_start:input_stop:dt, :, :], dtype=np.float32)[..., None]
+                tar_seq = np.asarray(fields[target_times, :, :], dtype=np.float32)[..., None]
+            else:
+                inp_seq = np.asarray(
+                    fields[input_start:input_stop:dt, :, :, :],
+                    dtype=np.float32,
+                )
+                tar_seq = np.asarray(fields[target_times, :, :, :], dtype=np.float32)
 
         inp = _reshape_fields(
             inp_seq,
@@ -526,6 +663,15 @@ def build_data_loader(
         "pin_memory": bool(config.pin_memory),
         "persistent_workers": persistent_workers,
     }
+    if train and torch.distributed.is_available() and torch.distributed.is_initialized():
+        world_size = int(torch.distributed.get_world_size())
+        if world_size > 1:
+            # Each rank sees a disjoint shard; drop_last keeps per-rank batch
+            # counts identical so gradient all-reduces stay in lockstep.
+            from torch.utils.data.distributed import DistributedSampler
+            loader_kwargs["sampler"] = DistributedSampler(dataset, shuffle=True, drop_last=True)
+            loader_kwargs["shuffle"] = False
+            logging.info("Train loader sharded with DistributedSampler over %d ranks.", world_size)
     if num_workers > 0 and config.prefetch_factor is not None:
         loader_kwargs["prefetch_factor"] = int(config.prefetch_factor)
     loader = DataLoader(

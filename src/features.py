@@ -580,6 +580,11 @@ class RolloutFeatureBuilder:
         else:
             height, width = int(self.graph.L0.height), int(self.graph.L0.width)
         field = np.asarray(field, dtype=np.float32).squeeze()
+        if width == 1 and field.ndim == 1 and int(field.size) == height:
+            # HEALPix: the grid is (npix, 1), so .squeeze() above collapsed the
+            # trailing axis and the exact-shape check below would reject a
+            # correctly regridded field. Restore it.
+            field = field.reshape(height, width)
         if field.shape != (height, width):
             message = f"Static feature {canonical!r} shape {field.shape} does not match grid {(height, width)}."
             if self.settings.require_static_features:

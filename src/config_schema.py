@@ -181,6 +181,21 @@ class MeshEncoderConfig(_Section):
     def coarse_level_connectivity(self) -> Any:
         return self._raw.get("coarse_level_connectivity", "native_icosphere")
 
+    @property
+    def mesh_type(self) -> Any:
+        """"icosphere" (default) or "healpix"."""
+        return self._raw.get("mesh_type", "icosphere")
+
+    @property
+    def nside(self) -> Any:
+        """HEALPix nside of the finest mesh level; mesh_type='healpix' only."""
+        return self._raw.get("nside", 32)
+
+    @property
+    def regrid_oversample(self) -> Any:
+        """Sub-cells per lat-lon cell axis when integrating the regrid overlap."""
+        return self._raw.get("regrid_oversample", 8)
+
 
 class ModelConfig(_Section):
     """View over the ``model`` sub-dict of a resolved config."""

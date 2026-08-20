@@ -12,6 +12,8 @@ MODEL_CONFIG_KEYS = {
     "input_channels",
     "output_channels",
     "hidden_dim",
+    "level_dims",
+    "level_heads",
     "edge_dim",
     "num_heads",
     "heads",
@@ -64,7 +66,21 @@ MESH_ENCODER_KEYS = {
     "grid_attention_decoder_blocks",
     "grid_attention_k_neighbors",
     "coarse_level_connectivity",
+    # HEALPix mesh (mesh_type: healpix). See SUPPORTED_MESH_TYPES.
+    "mesh_type",
+    "nside",
+    "regrid_oversample",
 }
+SUPPORTED_MESH_TYPES = {"icosphere", "healpix"}
+# Keys that only mean something for an icosphere mesh; setting them alongside
+# mesh_type: healpix is a config mistake, not a harmless extra.
+ICOSPHERE_ONLY_MESH_ENCODER_KEYS = {
+    "refinement",
+    "g2m_radius_factor",
+    "coarse_level_connectivity",
+}
+# ...and the reverse.
+HEALPIX_ONLY_MESH_ENCODER_KEYS = {"nside", "regrid_oversample"}
 
 
 @dataclass(frozen=True)
@@ -131,9 +147,12 @@ class MeshEncoderConfig:
     grid_attention_decoder_blocks: int = 0
     grid_attention_k_neighbors: int = 8
     coarse_level_connectivity: str = "native_icosphere"
+    mesh_type: str = "icosphere"
+    nside: int = 32
+    regrid_oversample: int = 8
 
     def asdict(self) -> dict[str, Any]:
-        return {
+        resolved = {
             "enabled": bool(self.enabled),
             "refinement": int(self.refinement),
             "g2m_radius_factor": float(self.g2m_radius_factor),
@@ -146,6 +165,28 @@ class MeshEncoderConfig:
             "grid_attention_k_neighbors": int(self.grid_attention_k_neighbors),
             "coarse_level_connectivity": self.coarse_level_connectivity,
         }
+        if self.mesh_type == "icosphere":
+            return resolved
+        # HEALPix. The mesh keys are emitted only here, for the same reason the whole
+        # mesh_encoder block is emitted only when configured: every existing icosphere
+        # config must resolve byte-for-byte as before.
+        #
+        # The icosphere-only keys are DROPPED rather than left at their defaults, and
+        # that is load-bearing, not tidiness: resolve_mesh_encoder is applied to its
+        # own output (architecture_metadata and validate_checkpoint_architecture both
+        # re-resolve an already-resolved config), so emitting `refinement: 5` here
+        # would make the next pass see an explicitly-set icosphere key and reject it.
+        # resolve_mesh_encoder must be idempotent.
+        for key in ICOSPHERE_ONLY_MESH_ENCODER_KEYS:
+            resolved.pop(key, None)
+        resolved.update(
+            {
+                "mesh_type": self.mesh_type,
+                "nside": int(self.nside),
+                "regrid_oversample": int(self.regrid_oversample),
+            }
+        )
+        return resolved
 
 
 @dataclass(frozen=True)
@@ -492,13 +533,12 @@ def resolve_mesh_encoder(source: Any | None = None) -> MeshEncoderConfig:
             "mesh_encoder.boundary_type='fixed_spherical' is parameter-free and "
             "does not support grid_skip_mlp."
         )
-    if boundary_type == "fixed_spherical" and (
-        grid_attention_encoder_blocks or grid_attention_decoder_blocks
-    ):
-        raise ValueError(
-            "mesh_encoder.boundary_type='fixed_spherical' maps raw channels "
-            "directly to/from the mesh and does not support grid-attention blocks."
-        )
+    # 'fixed_spherical' + grid-attention blocks is supported and changes what the
+    # fixed remap carries: without blocks it interpolates RAW channels onto the mesh
+    # and interpolates the output delta back; with blocks the grid is embedded first,
+    # the remap moves HIDDEN features both ways, and the head runs on the grid. The
+    # conservative weights themselves are identical either way. See models.py
+    # (grid_message_passing) and mesh_builder.build_healpix_mesh_bundle.
     coarse_level_connectivity = str(
         raw_dict.get("coarse_level_connectivity", "native_icosphere")
     ).strip().lower()
@@ -508,6 +548,41 @@ def resolve_mesh_encoder(source: Any | None = None) -> MeshEncoderConfig:
             "Unsupported mesh_encoder.coarse_level_connectivity="
             f"{coarse_level_connectivity!r}. Expected one of: {available}."
         )
+    mesh_type = str(raw_dict.get("mesh_type", "icosphere")).strip().lower()
+    if mesh_type not in SUPPORTED_MESH_TYPES:
+        available = ", ".join(sorted(SUPPORTED_MESH_TYPES))
+        raise ValueError(
+            f"Unsupported mesh_encoder.mesh_type={mesh_type!r}. Expected one of: {available}."
+        )
+    nside = _positive_int(raw_dict.get("nside", 32), "mesh_encoder.nside")
+    regrid_oversample = _positive_int(
+        raw_dict.get("regrid_oversample", 8),
+        "mesh_encoder.regrid_oversample",
+    )
+    if mesh_type == "healpix":
+        if nside & (nside - 1):
+            raise ValueError(
+                f"mesh_encoder.nside must be a power of two, got {nside}: HEALPix "
+                "pooling is a NEST quadtree (parent = pixel >> 2)."
+            )
+        if boundary_type != "fixed_spherical":
+            raise ValueError(
+                "mesh_encoder.mesh_type='healpix' requires boundary_type='fixed_spherical'; "
+                f"the conservative regrid is a fixed, parameter-free remap, got {boundary_type!r}."
+            )
+        conflicting = sorted(set(raw_dict) & ICOSPHERE_ONLY_MESH_ENCODER_KEYS)
+        if conflicting:
+            raise ValueError(
+                f"mesh_encoder keys {conflicting} only apply to mesh_type='icosphere'; "
+                "a HEALPix mesh has no refinement level, no radius rule and no icosphere "
+                "connectivity. Remove them."
+            )
+    else:
+        conflicting = sorted(set(raw_dict) & HEALPIX_ONLY_MESH_ENCODER_KEYS)
+        if conflicting:
+            raise ValueError(
+                f"mesh_encoder keys {conflicting} require mesh_type='healpix'."
+            )
     return MeshEncoderConfig(
         enabled=enabled,
         refinement=_positive_int(raw_dict.get("refinement", 5), "mesh_encoder.refinement"),
@@ -526,6 +601,9 @@ def resolve_mesh_encoder(source: Any | None = None) -> MeshEncoderConfig:
         grid_attention_decoder_blocks=grid_attention_decoder_blocks,
         grid_attention_k_neighbors=grid_attention_k_neighbors,
         coarse_level_connectivity=coarse_level_connectivity,
+        mesh_type=mesh_type,
+        nside=nside,
+        regrid_oversample=regrid_oversample,
     )
 
 
@@ -714,24 +792,71 @@ def normalize_model_config_dict(params: dict[str, Any]) -> dict[str, Any]:
         resolved["mesh_encoder"] = mesh_encoder
         model_dict["mesh_encoder"] = dict(mesh_encoder)
         if bool(mesh_encoder["enabled"]):
-            refinement = int(mesh_encoder["refinement"])
             levels = int(arch.num_graph_levels)
-            if refinement < levels - 1:
-                raise ValueError(
-                    f"mesh_encoder.refinement={refinement} is too small for "
-                    f"num_graph_levels={levels}; expected at least {levels - 1}."
-                )
-            mesh_node_counts = [10 * (4 ** (refinement - idx)) + 2 for idx in range(levels)]
-            level_k_neighbors = [6] * levels
-            if mesh_encoder["coarse_level_connectivity"] == "full_m1":
-                coarsest_refinement = refinement - (levels - 1)
-                if coarsest_refinement != 1:
+            if mesh_encoder.get("mesh_type", "icosphere") == "healpix":
+                # HEALPix quadtree: 12*nside^2 pixels, halving nside per level.
+                nside = int(mesh_encoder["nside"])
+                coarsest_nside = nside >> (levels - 1)
+                if coarsest_nside < 1:
                     raise ValueError(
-                        "mesh_encoder.coarse_level_connectivity='full_m1' requires "
-                        f"the coarsest level to be M1, got M{coarsest_refinement} "
-                        f"(refinement={refinement}, num_graph_levels={levels})."
+                        f"mesh_encoder.nside={nside} is too small for "
+                        f"num_graph_levels={levels}; the coarsest level would have "
+                        f"nside={coarsest_nside}. Need nside >= 2**{levels - 1}."
                     )
-                level_k_neighbors[-1] = mesh_node_counts[-1] - 1
+                mesh_node_counts = [12 * (nside >> idx) ** 2 for idx in range(levels)]
+                # True HEALPix adjacency is 8 slots per pixel (24 pixels have 7 real
+                # neighbours and one masked self-pad), so 8 is the default on every
+                # level. Unlike the icosphere branch this does NOT force the mesh
+                # degree: an explicit level_k_neighbors is honoured so a densified
+                # coarsest level (the dense-L3K24 recipe) can be reproduced on a
+                # HEALPix mesh. Levels at k=8 keep true adjacency; a level asking for
+                # more falls back to spherical kNN, matching graph_builder's
+                # per-level dispatch on the HEALPix-native path.
+                if "level_k_neighbors" in resolved:
+                    level_k_neighbors = [int(x) for x in arch.level_k_neighbors]
+                    if len(level_k_neighbors) != levels:
+                        raise ValueError(
+                            f"level_k_neighbors must have length num_graph_levels={levels}; "
+                            f"got {len(level_k_neighbors)}."
+                        )
+                    for idx, (level_k, count) in enumerate(
+                        zip(level_k_neighbors, mesh_node_counts)
+                    ):
+                        if level_k < 8:
+                            raise ValueError(
+                                f"level_k_neighbors[{idx}]={level_k} is below the HEALPix "
+                                "mesh degree; use 8 for true adjacency or more than 8 to "
+                                "densify that level with spherical kNN."
+                            )
+                        if level_k >= count:
+                            raise ValueError(
+                                f"level_k_neighbors[{idx}]={level_k} needs fewer neighbours "
+                                f"than that level has pixels ({count})."
+                            )
+                else:
+                    level_k_neighbors = [8] * levels
+                # Must match mesh_builder.HEALPIX_MESH_FORMAT_VERSION; pinned by
+                # tests/test_healpix_mesh.py so the two cannot drift.
+                mesh_format_version: Any = "hpx_mesh_v1"
+            else:
+                refinement = int(mesh_encoder["refinement"])
+                if refinement < levels - 1:
+                    raise ValueError(
+                        f"mesh_encoder.refinement={refinement} is too small for "
+                        f"num_graph_levels={levels}; expected at least {levels - 1}."
+                    )
+                mesh_node_counts = [10 * (4 ** (refinement - idx)) + 2 for idx in range(levels)]
+                level_k_neighbors = [6] * levels
+                if mesh_encoder["coarse_level_connectivity"] == "full_m1":
+                    coarsest_refinement = refinement - (levels - 1)
+                    if coarsest_refinement != 1:
+                        raise ValueError(
+                            "mesh_encoder.coarse_level_connectivity='full_m1' requires "
+                            f"the coarsest level to be M1, got M{coarsest_refinement} "
+                            f"(refinement={refinement}, num_graph_levels={levels})."
+                        )
+                    level_k_neighbors[-1] = mesh_node_counts[-1] - 1
+                mesh_format_version = 1
             resolved["node_counts"] = mesh_node_counts
             resolved["level_k_neighbors"] = level_k_neighbors
             model_dict["level_k_neighbors"] = list(level_k_neighbors)
@@ -739,7 +864,7 @@ def normalize_model_config_dict(params: dict[str, Any]) -> dict[str, Any]:
                 count * level_k
                 for count, level_k in zip(mesh_node_counts, level_k_neighbors)
             ]
-            resolved["mesh_format_version"] = 1
+            resolved["mesh_format_version"] = mesh_format_version
     if arch.lead_conditioning.enabled:
         output_channels = int(resolved.get("output_channels", model_dict.get("output_channels", 67)))
         n_history = int(resolved.get("n_history", 1))
