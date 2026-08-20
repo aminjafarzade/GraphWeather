@@ -41,6 +41,8 @@ class GraphUNetProcessor(nn.Module):
         l4_blocks: int = 1,
         l3_refine_after_l4_blocks: int = 1,
         l2_refine_after_l3_blocks: int = 1,
+        level_dims: list[int] | tuple[int, ...] | None = None,
+        level_heads: list[int] | tuple[int, ...] | None = None,
         skip_fusion: dict | None = None,
         pooling: dict | None = None,
         l0_refine: dict | None = None,
@@ -85,59 +87,75 @@ class GraphUNetProcessor(nn.Module):
         self.l2_refine_after_l3_blocks_count = int(arch.l2_refine_after_l3_blocks)
         self.l1_refine_blocks_count = int(arch.l1_refine_blocks)
         self.l0_refine_blocks_count = int(arch.l0_refine_blocks)
+        n_levels = int(arch.num_graph_levels)
+        dims = [int(dim)] * n_levels if level_dims is None else [int(x) for x in level_dims]
+        hds = [int(heads)] * n_levels if level_heads is None else [int(x) for x in level_heads]
+        if len(dims) != n_levels:
+            raise ValueError(f"level_dims must have length num_graph_levels={n_levels}, got {len(dims)}.")
+        if len(hds) != n_levels:
+            raise ValueError(f"level_heads must have length num_graph_levels={n_levels}, got {len(hds)}.")
+        for level_idx, (level_dim, level_head_count) in enumerate(zip(dims, hds)):
+            if level_dim < 1:
+                raise ValueError(f"level_dims[{level_idx}]={level_dim} must be >= 1.")
+            if level_head_count < 1:
+                raise ValueError(f"level_heads[{level_idx}]={level_head_count} must be >= 1.")
+            if level_dim % level_head_count != 0:
+                raise ValueError(
+                    f"level_dims[{level_idx}]={level_dim} must be divisible by "
+                    f"level_heads[{level_idx}]={level_head_count}."
+                )
+        self.level_dims = list(dims)
+        self.level_heads = list(hds)
         if self.use_l3:
             if getattr(graph, "L3", None) is None or getattr(graph, "pool_L2_to_L3", None) is None:
                 raise ValueError("L3 processor path requested, but the graph bundle has no L3 level/pool map.")
         if self.use_l4:
             if getattr(graph, "L4", None) is None or getattr(graph, "pool_L3_to_L4", None) is None:
                 raise ValueError("L4 processor path requested, but the graph bundle has no L4 level/pool map.")
+        def _blk(d: int, h: int) -> LocalGraphAttentionBlock:
+            return LocalGraphAttentionBlock(d, edge_dim=edge_dim, heads=h, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl)
+
         self.l0_blocks = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l0_blocks)]
+            [_blk(dims[0], hds[0]) for _ in range(arch.l0_blocks)]
         )
-        self.pool01 = MeanMaxPool(dim, pooling=self.pooling, name="l0_to_l1")
+        self.pool01 = MeanMaxPool(dims[0], pooling=self.pooling, name="l0_to_l1", out_dim=dims[1])
         self.l1_blocks = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l1_blocks)]
+            [_blk(dims[1], hds[1]) for _ in range(arch.l1_blocks)]
         )
-        self.pool12 = MeanMaxPool(dim, pooling=self.pooling, name="l1_to_l2")
+        self.pool12 = MeanMaxPool(dims[1], pooling=self.pooling, name="l1_to_l2", out_dim=dims[2])
         self.l2_blocks = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l2_blocks)]
+            [_blk(dims[2], hds[2]) for _ in range(arch.l2_blocks)]
         )
         if self.use_l3:
-            self.pool23 = MeanMaxPool(dim, pooling=self.pooling, name="l2_to_l3")
+            self.pool23 = MeanMaxPool(dims[2], pooling=self.pooling, name="l2_to_l3", out_dim=dims[3])
             self.l3_blocks = nn.ModuleList(
-                [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l3_blocks)]
+                [_blk(dims[3], hds[3]) for _ in range(arch.l3_blocks)]
             )
             if self.use_l4:
-                self.pool34 = MeanMaxPool(dim, pooling=self.pooling, name="l3_to_l4")
+                self.pool34 = MeanMaxPool(dims[3], pooling=self.pooling, name="l3_to_l4", out_dim=dims[4])
                 self.l4_blocks = nn.ModuleList(
-                    [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l4_blocks)]
+                    [_blk(dims[4], hds[4]) for _ in range(arch.l4_blocks)]
                 )
-                self.unpool43 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l4_to_l3")
+                self.unpool43 = ParentUnpoolFuse(dims[3], skip_fusion=self.skip_fusion, name="l4_to_l3", coarse_dim=dims[4])
                 self.l3_refine_after_l4 = nn.ModuleList(
-                    [
-                        LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl)
-                        for _ in range(arch.l3_refine_after_l4_blocks)
-                    ]
+                    [_blk(dims[3], hds[3]) for _ in range(arch.l3_refine_after_l4_blocks)]
                 )
-            self.unpool32 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l3_to_l2")
+            self.unpool32 = ParentUnpoolFuse(dims[2], skip_fusion=self.skip_fusion, name="l3_to_l2", coarse_dim=dims[3])
             self.l2_refine_after_l3 = nn.ModuleList(
-                [
-                    LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl)
-                    for _ in range(arch.l2_refine_after_l3_blocks)
-                ]
+                [_blk(dims[2], hds[2]) for _ in range(arch.l2_refine_after_l3_blocks)]
             )
-        self.unpool21 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l2_to_l1")
+        self.unpool21 = ParentUnpoolFuse(dims[1], skip_fusion=self.skip_fusion, name="l2_to_l1", coarse_dim=dims[2])
         self.l1_refine = nn.ModuleList(
-            [LocalGraphAttentionBlock(dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(arch.l1_refine_blocks)]
+            [_blk(dims[1], hds[1]) for _ in range(arch.l1_refine_blocks)]
         )
-        self.unpool10 = ParentUnpoolFuse(dim, skip_fusion=self.skip_fusion, name="l1_to_l0")
+        self.unpool10 = ParentUnpoolFuse(dims[0], skip_fusion=self.skip_fusion, name="l1_to_l0", coarse_dim=dims[1])
         self.l0_refine = nn.ModuleList(
             [
                 self._make_l0_refine_block(
                     idx,
-                    dim=dim,
+                    dim=dims[0],
                     edge_dim=edge_dim,
-                    heads=heads,
+                    heads=hds[0],
                     config=self.l0_refine_config,
                     edge_encoding=self.edge_encoding,
                     attention_impl=self.attention_impl,
@@ -146,11 +164,11 @@ class GraphUNetProcessor(nn.Module):
             ]
         )
         if self.l0_refine_config["type"] == "nodewise_mlp":
-            hidden = int(dim) * int(self.l0_refine_config["mlp_expansion"])
+            hidden = int(dims[0]) * int(self.l0_refine_config["mlp_expansion"])
             logging.info("Using l0_refine type: nodewise_mlp")
             logging.info(
                 "NodewiseRefineMLP dim=%d hidden=%d residual_scale_init=%.6g",
-                int(dim),
+                int(dims[0]),
                 hidden,
                 float(self.l0_refine_config["residual_scale_init"]),
             )

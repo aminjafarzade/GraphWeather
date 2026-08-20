@@ -8,9 +8,18 @@ from torch import nn
 
 
 class MeanMaxPool(nn.Module):
-    def __init__(self, dim: int, pooling: dict[str, Any] | None = None, name: str = ""):
+    def __init__(
+        self,
+        dim: int,
+        pooling: dict[str, Any] | None = None,
+        name: str = "",
+        out_dim: int | None = None,
+    ):
         super().__init__()
         self.name = str(name)
+        # dim is the fine-level input width; out_dim the coarse-level output
+        # width. out_dim=None keeps the historical equal-width behaviour.
+        self.out_dim = int(out_dim) if out_dim is not None else int(dim)
         raw = dict(pooling or {})
         self.pooling_type = str(raw.get("type", "default")).strip().lower()
         self.init_scale = float(raw.get("init_scale", 1.0))
@@ -33,7 +42,7 @@ class MeanMaxPool(nn.Module):
         else:
             self.register_parameter("mean_gate_logit", None)
             self.register_parameter("max_gate_logit", None)
-        self.proj = nn.Linear((2 if self.include_max else 1) * dim, dim)
+        self.proj = nn.Linear((2 if self.include_max else 1) * dim, self.out_dim)
 
     def _scale_tensor(self, logit: torch.Tensor, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
         return self.max_scale * torch.sigmoid(logit.to(device=device, dtype=dtype))
@@ -115,9 +124,18 @@ class ParentUnpoolFuse(nn.Module):
     checkpoints keep their original architecture.
     """
 
-    def __init__(self, dim: int, skip_fusion: dict[str, Any] | None = None, name: str = ""):
+    def __init__(
+        self,
+        dim: int,
+        skip_fusion: dict[str, Any] | None = None,
+        name: str = "",
+        coarse_dim: int | None = None,
+    ):
         super().__init__()
         self.name = str(name)
+        # dim is the fine (skip/output) width; coarse_dim the broadcast parent
+        # width. coarse_dim=None keeps the historical equal-width behaviour.
+        self.coarse_dim = int(coarse_dim) if coarse_dim is not None else int(dim)
         raw = dict(skip_fusion or {})
         self.skip_fusion_type = str(raw.get("type", "default")).strip().lower()
         self.init_scale = float(raw.get("init_scale", 1.0))
@@ -136,11 +154,18 @@ class ParentUnpoolFuse(nn.Module):
         else:
             self.register_parameter("skip_gate_logit", None)
             self.register_parameter("up_gate_logit", None)
+        if self.skip_fusion_type == "sum" and self.coarse_dim != int(dim):
+            raise ValueError(
+                f"skip_fusion.type='sum' is parameter-free and needs equal widths, "
+                f"got dim={int(dim)} and coarse_dim={self.coarse_dim} for {self.name!r}."
+            )
+        # forward concatenates [h_skip, h_up] -- skip (dim) first, then the
+        # broadcast parent (coarse_dim) -- so the fusion input is dim + coarse_dim.
         self.fuse = (
             None
             if self.skip_fusion_type == "sum"
             else nn.Sequential(
-                nn.Linear(2 * dim, dim),
+                nn.Linear(dim + self.coarse_dim, dim),
                 nn.GELU(),
                 nn.Linear(dim, dim),
             )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 from collections.abc import Iterator
 
 import torch
@@ -43,6 +44,8 @@ class GraphWeatherModel(nn.Module):
         heads: int = 4,
         k_neighbors: int = 8,
         level_k_neighbors: list[int] | tuple[int, ...] | None = None,
+        level_dims: list[int] | tuple[int, ...] | None = None,
+        level_heads: list[int] | tuple[int, ...] | None = None,
         encoder_blocks: int = 1,
         decoder_blocks: int = 1,
         l0_blocks: int = 2,
@@ -126,14 +129,18 @@ class GraphWeatherModel(nn.Module):
                 "mesh_encoder.grid_skip_mlp=true requires "
                 "mesh_encoder.boundary_type='graphcast_mlp'."
             )
-        if self.fixed_spherical_boundary and (
-            self.grid_attention_encoder_blocks
-            or self.grid_attention_decoder_blocks
-        ):
-            raise ValueError(
-                "mesh_encoder.boundary_type='fixed_spherical' maps raw channels "
-                "directly and cannot be combined with grid-attention blocks."
+        # With grid-attention blocks the fixed remap moves embedded hidden features
+        # instead of raw channels, so the grid gets message passing BEFORE the
+        # grid->mesh interpolation and AFTER the mesh->grid one, and the head runs on
+        # the grid (the output delta is never interpolated). Without blocks the
+        # historical raw-channel behavior is preserved bit-for-bit.
+        self.grid_message_passing = bool(
+            self.fixed_spherical_boundary
+            and (
+                self.grid_attention_encoder_blocks
+                or self.grid_attention_decoder_blocks
             )
+        )
         if self.mesh_mode:
             # In mesh mode graph.L0 is the icosphere; the data grid lives on the bundle.
             if str(getattr(graph, "graph_mode", "grid")) != "mesh":
@@ -238,6 +245,39 @@ class GraphWeatherModel(nn.Module):
         self.l2_refine_after_l3_blocks_count = int(arch.l2_refine_after_l3_blocks)
         self.l1_refine_blocks_count = int(arch.l1_refine_blocks)
         self.l0_refine_blocks_count = int(arch.l0_refine_blocks)
+        n_levels = int(arch.num_graph_levels)
+        dims = [int(hidden_dim)] * n_levels if level_dims is None else [int(x) for x in level_dims]
+        hds = [int(heads)] * n_levels if level_heads is None else [int(x) for x in level_heads]
+        if len(dims) != n_levels:
+            raise ValueError(f"level_dims must have length num_graph_levels={n_levels}, got {len(dims)}.")
+        if len(hds) != n_levels:
+            raise ValueError(f"level_heads must have length num_graph_levels={n_levels}, got {len(hds)}.")
+        for level_idx, (level_dim, level_head_count) in enumerate(zip(dims, hds)):
+            if level_dim < 1:
+                raise ValueError(f"level_dims[{level_idx}]={level_dim} must be >= 1.")
+            if level_head_count < 1:
+                raise ValueError(f"level_heads[{level_idx}]={level_head_count} must be >= 1.")
+            if level_dim % level_head_count != 0:
+                raise ValueError(
+                    f"level_dims[{level_idx}]={level_dim} must be divisible by "
+                    f"level_heads[{level_idx}]={level_head_count}."
+                )
+        # The grid<->mesh transfer only ever touches L0, so it is only L0 that has to
+        # match the grid-side width. Levels 1..N-1 are free: GraphUNetProcessor already
+        # projects between differing widths (MeanMaxPool(out_dim=dims[i+1]) on the way
+        # down, ParentUnpoolFuse(coarse_dim=dims[i+1]) on the way up). Previously this
+        # required every level to equal hidden_dim, which blocked tapered ("inverted")
+        # level_dims on mesh graphs for no architectural reason. Uniform level_dims are
+        # unaffected: dims[0] == hidden_dim holds there exactly as before.
+        if self.mesh_mode and dims[0] != hidden_dim:
+            raise ValueError(
+                "mesh_encoder.enabled=true feeds the grid<->mesh transfer straight into "
+                f"L0, so level_dims[0]={dims[0]} must equal hidden_dim={hidden_dim}. "
+                f"Coarser levels may differ; got level_dims={dims}."
+            )
+        self.level_dims = list(dims)
+        self.level_heads = list(hds)
+        d0, h0 = dims[0], hds[0]
         self.adapter = GridNodeAdapter(
             grid_shape=grid_shape,
             input_channels=input_channels,
@@ -252,26 +292,26 @@ class GraphWeatherModel(nn.Module):
         self.grid_static_dim = 4 if self.graphcast_mesh_boundary else 0
         self.embedding_input_channels = self.total_node_feature_channels + self.grid_static_dim
         if self.graphcast_mesh_boundary:
-            boundary_hidden = hidden_dim * int(self._mesh_cfg.get("mlp_hidden_ratio", 2))
+            boundary_hidden = d0 * int(self._mesh_cfg.get("mlp_hidden_ratio", 2))
             self.embed = MLPLayerNorm(
                 self.embedding_input_channels,
                 boundary_hidden,
-                hidden_dim,
+                d0,
             )
         elif self.boundary_mlp:
             # Arm E: two-layer GELU encoder with output LayerNorm. Only the
             # non-GraphCast-boundary path is swapped; the mesh path above keeps
             # its MLPLayerNorm so existing checkpoints stay loadable.
             self.embed = nn.Sequential(
-                nn.Linear(self.total_node_feature_channels, hidden_dim),
+                nn.Linear(self.total_node_feature_channels, d0),
                 nn.GELU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
+                nn.Linear(d0, d0),
+                nn.LayerNorm(d0),
             )
         else:
-            self.embed = nn.Linear(self.total_node_feature_channels, hidden_dim)
+            self.embed = nn.Linear(self.total_node_feature_channels, d0)
         self.encoder = nn.ModuleList(
-            [LocalGraphAttentionBlock(hidden_dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(encoder_blocks)]
+            [LocalGraphAttentionBlock(d0, edge_dim=edge_dim, heads=h0, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(encoder_blocks)]
         )
         self.processor = GraphUNetProcessor(
             hidden_dim,
@@ -289,6 +329,8 @@ class GraphWeatherModel(nn.Module):
             l4_blocks=arch.l4_blocks,
             l3_refine_after_l4_blocks=arch.l3_refine_after_l4_blocks,
             l2_refine_after_l3_blocks=arch.l2_refine_after_l3_blocks,
+            level_dims=self.level_dims,
+            level_heads=self.level_heads,
             skip_fusion=self.skip_fusion,
             pooling=self.pooling,
             l0_refine=self.l0_refine_config,
@@ -296,12 +338,12 @@ class GraphWeatherModel(nn.Module):
             attention_impl=self.attention_impl,
         )
         self.decoder = nn.ModuleList(
-            [LocalGraphAttentionBlock(hidden_dim, edge_dim=edge_dim, heads=heads, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(decoder_blocks)]
+            [LocalGraphAttentionBlock(d0, edge_dim=edge_dim, heads=h0, edge_encoding=self.edge_encoding, attention_impl=self.attention_impl) for _ in range(decoder_blocks)]
         )
         self.grid_encoder = nn.ModuleList(
             [
                 LocalGraphAttentionBlock(
-                    hidden_dim, edge_dim=edge_dim, heads=heads,
+                    d0, edge_dim=edge_dim, heads=h0,
                     edge_encoding=self.edge_encoding, attention_impl=self.attention_impl,
                 )
                 for _ in range(self.grid_attention_encoder_blocks)
@@ -310,7 +352,7 @@ class GraphWeatherModel(nn.Module):
         self.grid_decoder = nn.ModuleList(
             [
                 LocalGraphAttentionBlock(
-                    hidden_dim, edge_dim=edge_dim, heads=heads,
+                    d0, edge_dim=edge_dim, heads=h0,
                     edge_encoding=self.edge_encoding, attention_impl=self.attention_impl,
                 )
                 for _ in range(self.grid_attention_decoder_blocks)
@@ -318,12 +360,12 @@ class GraphWeatherModel(nn.Module):
         )
         if self.boundary_mlp:
             self.head = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
+                nn.Linear(d0, d0),
                 nn.GELU(),
-                nn.Linear(hidden_dim, output_channels),
+                nn.Linear(d0, output_channels),
             )
         else:
-            self.head = nn.Linear(hidden_dim, output_channels)
+            self.head = nn.Linear(d0, output_channels)
         if self.head_init_std > 0.0:
             # Small-init the FINAL projection so the initial delta is near zero.
             # Works for both the Linear and Sequential head forms.
@@ -356,6 +398,28 @@ class GraphWeatherModel(nn.Module):
             self.mesh_node_init = None
             self.grid2mesh = FixedBipartiteRemap()
             self.mesh2grid = FixedBipartiteRemap()
+            # Long grid skip around the mesh round trip. The conservative remap is
+            # low-pass in both directions, so without a path that bypasses it the
+            # grid-scale detail the grid_encoder just built is destroyed before the
+            # grid_decoder can use it. One learnable scalar, gated like
+            # pooling.SkipFusion: scale = max_scale * sigmoid(logit), init at
+            # skip_fusion.init_scale.
+            if self.grid_message_passing:
+                init_scale = float(self.skip_fusion.get("init_scale", 1.0))
+                max_scale = float(self.skip_fusion.get("max_scale", 2.0))
+                if not 0.0 < init_scale < max_scale:
+                    raise ValueError(
+                        f"skip_fusion init_scale={init_scale:g} must be > 0 and "
+                        f"< max_scale={max_scale:g} for the mesh grid skip."
+                    )
+                self.grid_skip_max_scale = max_scale
+                ratio = init_scale / max_scale
+                self.grid_skip_logit = nn.Parameter(
+                    torch.tensor(math.log(ratio / (1.0 - ratio)), dtype=torch.float32)
+                )
+            else:
+                self.grid_skip_max_scale = 0.0
+                self.register_parameter("grid_skip_logit", None)
         elif self.mesh_mode:
             mesh_static_dim = int(self.graph.mesh_static.shape[-1])
             mlp_ratio = int(self._mesh_cfg.get("mlp_hidden_ratio", 2))
@@ -608,7 +672,7 @@ class GraphWeatherModel(nn.Module):
             grid_static = grid_static.unsqueeze(0).expand(int(node_x.shape[0]), -1, -1)
             node_x = torch.cat([node_x, grid_static], dim=-1)
             self._add_diag(diagnostics_collector, "model/grid_input_with_geometry", node_x)
-        if self.fixed_spherical_boundary:
+        if self.fixed_spherical_boundary and not self.grid_message_passing:
             node_x = self.grid2mesh(
                 node_x,
                 self.graph.g2m_edge_index,
@@ -619,7 +683,65 @@ class GraphWeatherModel(nn.Module):
         h = self.embed(node_x)
         self._add_diag(diagnostics_collector, "model/embed", h)
         if self.mesh_mode:
-            if self.fixed_spherical_boundary:
+            if self.grid_message_passing:
+                # Grid message passing -> conservative remap of HIDDEN features ->
+                # mesh U-Net -> conservative remap back -> grid message passing.
+                # embed/encoder/processor/decoder/head are reused unchanged; only
+                # what the fixed remap carries and where the head runs differ.
+                for idx, block in enumerate(self.grid_encoder):
+                    h = block(
+                        h,
+                        self.graph.grid_attention_graph,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/grid_encoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/grid_encoder.{idx}", h)
+                h_grid_skip = h
+                h_mesh = self.grid2mesh(
+                    h,
+                    self.graph.g2m_edge_index,
+                    self.graph.g2m_edge_weight,
+                    self.graph.L0.num_nodes,
+                )
+                self._add_diag(diagnostics_collector, "model/grid2mesh", h_mesh)
+                for idx, block in enumerate(self.encoder):
+                    h_mesh = block(
+                        h_mesh,
+                        self.graph.L0,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/encoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/encoder.{idx}", h_mesh)
+                h_mesh = self.processor(h_mesh, diagnostics_collector=diagnostics_collector)
+                for idx, block in enumerate(self.decoder):
+                    h_mesh = block(
+                        h_mesh,
+                        self.graph.L0,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/decoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/decoder.{idx}", h_mesh)
+                h = self.mesh2grid(
+                    h_mesh,
+                    self.graph.m2g_edge_index,
+                    self.graph.m2g_edge_weight,
+                    int(h_grid_skip.shape[1]),
+                )
+                self._add_diag(diagnostics_collector, "model/mesh2grid", h)
+                grid_skip_scale = self.grid_skip_max_scale * torch.sigmoid(
+                    self.grid_skip_logit.to(device=h.device, dtype=h.dtype)
+                )
+                h = h + grid_skip_scale * h_grid_skip
+                self._add_diag(diagnostics_collector, "model/grid_skip_fused", h)
+                for idx, block in enumerate(self.grid_decoder):
+                    h = block(
+                        h,
+                        self.graph.grid_attention_graph,
+                        diagnostics_collector=diagnostics_collector,
+                        diagnostics_name=_diag_name(diagnostics_collector, f"model/grid_decoder.{idx}"),
+                    )
+                    self._add_diag(diagnostics_collector, f"model/grid_decoder.{idx}", h)
+            elif self.fixed_spherical_boundary:
                 for idx, block in enumerate(self.encoder):
                     h = block(
                         h,
@@ -716,7 +838,7 @@ class GraphWeatherModel(nn.Module):
                 self._add_diag(diagnostics_collector, f"model/decoder.{idx}", h)
         delta_hat = self.head(h)
         self._add_diag(diagnostics_collector, "model/head_delta_normalized", delta_hat)
-        if self.fixed_spherical_boundary:
+        if self.fixed_spherical_boundary and not self.grid_message_passing:
             delta_hat = self.mesh2grid(
                 delta_hat,
                 self.graph.m2g_edge_index,

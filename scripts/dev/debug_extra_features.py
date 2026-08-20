@@ -623,6 +623,8 @@ def _build_model(
         heads=int(_get(params, "num_heads", 4)),
         k_neighbors=int(_get(params, "k_neighbors", 8)),
         level_k_neighbors=_get(params, "level_k_neighbors", None),
+        level_dims=_get(params, "level_dims", None),
+        level_heads=_get(params, "level_heads", None),
         encoder_blocks=int(_get(params, "encoder_blocks", 1)),
         decoder_blocks=int(_get(params, "decoder_blocks", 1)),
         l0_blocks=int(_get(params, "l0_blocks", 2)),

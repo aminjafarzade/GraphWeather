@@ -802,6 +802,8 @@ def _build_model(
         heads=int(_get(params, "num_heads", 4)),
         k_neighbors=int(_get(params, "k_neighbors", 8)),
         level_k_neighbors=_get(params, "level_k_neighbors", None),
+        level_dims=_get(params, "level_dims", None),
+        level_heads=_get(params, "level_heads", None),
         encoder_blocks=int(_get(params, "encoder_blocks", 1)),
         decoder_blocks=int(_get(params, "decoder_blocks", 1)),
         l0_blocks=int(_get(params, "l0_blocks", 2)),
@@ -1283,36 +1285,58 @@ def plot_variable_rollout_maps(
         figsize=(18.0, max(4.0, 4.0 * rows)),
         constrained_layout=False,
     )
-    gs = fig.add_gridspec(
-        rows,
-        5,
-        width_ratios=[1.0, 1.0, 0.035, 1.0, 0.035],
-        wspace=0.25,
-        hspace=0.35,
-    )
+    if same_scale_across_leads:
+        # Shared scales -> no per-row colorbars; one short extra row at the
+        # bottom holds a horizontal field bar (under GT+Pred) and bias bar.
+        gs = fig.add_gridspec(
+            rows + 1,
+            3,
+            width_ratios=[1.0, 1.0, 1.0],
+            height_ratios=[1.0] * rows + [0.07],
+            wspace=0.12,
+            hspace=0.35,
+        )
+    else:
+        gs = fig.add_gridspec(
+            rows,
+            5,
+            width_ratios=[1.0, 1.0, 0.035, 1.0, 0.035],
+            wspace=0.25,
+            hspace=0.35,
+        )
     variable_name = str(variable["name"])
     variable_label = str(variable["label"])
     metrics: dict[str, Any] = {}
     selected_indices = [int(lead) - 1 for lead in lead_times]
     shared_main_limits: tuple[float, float] | None = None
+    shared_bias_limits: tuple[float, float] | None = None
     if same_scale_across_leads:
         shared_main_limits = _robust_limits(
             [gt_maps[selected_indices], pred_maps[selected_indices]],
             robust_percentile,
             center_zero=False,
         )
+        # One symmetric bias scale across the selected leads, so error growth
+        # from short to long leads is visually comparable panel to panel.
+        shared_bias_limits = _robust_limits(
+            [gt_maps[selected_indices] - pred_maps[selected_indices]],
+            robust_percentile,
+            center_zero=True,
+        )
 
     for row, lead_time in enumerate(lead_times):
         step_idx = int(lead_time) - 1
         gt = gt_maps[step_idx]
         pred = pred_maps[step_idx]
-        bias = pred - gt
+        bias = gt - pred
         main_vmin, main_vmax = shared_main_limits or _robust_limits(
             [gt, pred],
             robust_percentile,
             center_zero=False,
         )
-        bias_vmin, bias_vmax = _robust_limits([bias], robust_percentile, center_zero=True)
+        bias_vmin, bias_vmax = shared_bias_limits or _robust_limits(
+            [bias], robust_percentile, center_zero=True
+        )
 
         rmse = float(np.sqrt(np.nanmean(np.square(bias))))
         bias_mean = float(np.nanmean(bias))
@@ -1330,9 +1354,14 @@ def plot_variable_rollout_maps(
 
         ax_gt = _add_map_axis(fig, gs[row, 0], use_cartopy)
         ax_pred = _add_map_axis(fig, gs[row, 1], use_cartopy)
-        cax_main = fig.add_subplot(gs[row, 2])
-        ax_bias = _add_map_axis(fig, gs[row, 3], use_cartopy)
-        cax_bias = fig.add_subplot(gs[row, 4])
+        if same_scale_across_leads:
+            cax_main = None
+            ax_bias = _add_map_axis(fig, gs[row, 2], use_cartopy)
+            cax_bias = None
+        else:
+            cax_main = fig.add_subplot(gs[row, 2])
+            ax_bias = _add_map_axis(fig, gs[row, 3], use_cartopy)
+            cax_bias = fig.add_subplot(gs[row, 4])
 
         gt_mesh = _plot_panel(
             ax_gt,
@@ -1365,7 +1394,7 @@ def plot_variable_rollout_maps(
             lons,
             lats,
             bias,
-            f"Bias {aggregate_label} day {lead_time}\nPred - GT | RMSE={rmse:.3g}",
+            f"Bias {aggregate_label} day {lead_time}\nGT - Pred | RMSE={rmse:.3g}",
             cmap_bias,
             bias_vmin,
             bias_vmax,
@@ -1374,18 +1403,30 @@ def plot_variable_rollout_maps(
             add_cyclic,
         )
 
-        main_cb = fig.colorbar(pred_mesh, cax=cax_main)
-        main_cb.ax.tick_params(labelsize=8)
-        main_cb.set_label(unit_label, fontsize=9)
-        bias_cb = fig.colorbar(bias_mesh, cax=cax_bias)
-        bias_cb.ax.tick_params(labelsize=8)
-        bias_cb.set_label(unit_label, fontsize=9)
+        if not same_scale_across_leads:
+            main_cb = fig.colorbar(pred_mesh, cax=cax_main)
+            main_cb.ax.tick_params(labelsize=8)
+            main_cb.set_label(unit_label, fontsize=9)
+            bias_cb = fig.colorbar(bias_mesh, cax=cax_bias)
+            bias_cb.ax.tick_params(labelsize=8)
+            bias_cb.set_label(unit_label, fontsize=9)
 
         if save_arrays:
             prefix = output_dir / f"{output_prefix}_{_safe_stem(variable_name)}_day{lead_time:02d}"
             np.save(f"{prefix}_gt.npy", gt)
             np.save(f"{prefix}_pred.npy", pred)
             np.save(f"{prefix}_bias.npy", bias)
+
+    if same_scale_across_leads:
+        # pred_mesh / bias_mesh from the last row carry the shared norms.
+        cax_main = fig.add_subplot(gs[rows, 0:2])
+        main_cb = fig.colorbar(pred_mesh, cax=cax_main, orientation="horizontal")
+        main_cb.ax.tick_params(labelsize=8)
+        main_cb.set_label(f"GT / Prediction  [{unit_label}]  (one scale for all days)", fontsize=9)
+        cax_bias = fig.add_subplot(gs[rows, 2])
+        bias_cb = fig.colorbar(bias_mesh, cax=cax_bias, orientation="horizontal")
+        bias_cb.ax.tick_params(labelsize=8)
+        bias_cb.set_label(f"Bias, GT - Pred  [{unit_label}]  (one scale for all days)", fontsize=9)
 
     checkpoint_stem = Path(checkpoint_path).stem
     if show_titles:
