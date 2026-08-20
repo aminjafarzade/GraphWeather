@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.amp as amp
+import torch.distributed as dist
 import yaml
 from torch.utils.checkpoint import checkpoint as torch_checkpoint
 from torch.nn.utils import clip_grad_norm_
@@ -53,10 +54,16 @@ from .graph_builder import (
 from .graph_bundle import load_graph_bundle
 from .layers import ATTENTION_IMPL_DEFAULT, resolve_attention_impl
 from .lead_conditioning import format_lead_sequence, lead_conditioning_debug_values
-from .losses import LatitudeWeightedMSE, graph_gradient_loss, low_frequency_spectral_loss
+from .losses import (
+    LatitudeWeightedMSE,
+    band_spectral_power_loss,
+    graph_gradient_loss,
+    low_frequency_spectral_loss,
+)
 from .lr_schedulers import RolloutStageWarmupCosineScheduler
 from .models import GraphWeatherModel
 from .resolution import get_resolution_spec, resolution_metadata
+from .resolution import grid_kind as _grid_kind
 from .target_handling import TargetHandling, combine_loss_channel_masks, target_handling_metadata_matches
 
 
@@ -166,7 +173,27 @@ class Trainer:
         self.world_rank = int(world_rank)
         self.local_rank = int(local_rank)
         self.device = _resolve_device(_get(params, "device", "auto"), self.local_rank)
-        if self.device.type == "cuda":
+        if (dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
+                and torch.cuda.is_available()):
+            # In a distributed run the device is NOT negotiable: one rank per
+            # GPU, bound at init_process_group. _resolve_device's kernel-probe
+            # fallback silently returned cuda:0 on non-zero ranks here, piling
+            # every rank's model onto GPU 0 and desyncing all collectives.
+            forced = torch.device("cuda", self.local_rank)
+            if self.device != forced:
+                logging.warning(
+                    "Distributed run: overriding resolved device %s with %s (one rank per GPU).",
+                    self.device, forced,
+                )
+                print(f"[ddp rank {self.world_rank}] device override: {self.device} -> {forced} "
+                      f"(device_count={torch.cuda.device_count()})", flush=True)
+            self.device = forced
+            # Do NOT kernel-probe here: the probe is what mis-resolved the
+            # device in rank processes in the first place. On a uniform
+            # multi-GPU node the bound device is correct by construction, and
+            # a genuinely unusable GPU fails loudly on the first forward.
+            torch.cuda.set_device(self.device)
+        elif self.device.type == "cuda":
             torch.cuda.set_device(self.device)
             _assert_cuda_device_usable(self.device)
             torch.backends.cudnn.benchmark = True
@@ -175,6 +202,21 @@ class Trainer:
         self.max_gradient_norm = None if raw_max_grad_norm is None else float(raw_max_grad_norm)
         self.gradient_accumulation_steps = max(1, int(_get(params, "gradient_accumulation_steps", 1)))
         self.batch_size = int(_get(params, "batch_size", 1))
+        # Multi-GPU data parallelism (manual gradient all-reduce; see
+        # _all_reduce_gradients). config batch_size is the GLOBAL batch: it is
+        # split across ranks so a 3-GPU run keeps the exact single-GPU recipe.
+        self.world_size = int(dist.get_world_size()) if (dist.is_available() and dist.is_initialized()) else 1
+        if self.world_size > 1:
+            if self.batch_size % self.world_size != 0:
+                raise ValueError(
+                    f"batch_size={self.batch_size} must be divisible by world_size={self.world_size} "
+                    "(config batch_size is the global batch, split evenly across ranks)."
+                )
+            self.batch_size //= self.world_size
+            logging.info(
+                "Distributed data parallel: world_size=%d | global_batch=%d -> per_rank_batch=%d",
+                self.world_size, self.batch_size * self.world_size, self.batch_size,
+            )
         self.effective_batch_size = self.batch_size * self.gradient_accumulation_steps
         self.log_every_batches = max(1, int(_get(params, "log_every_batches", 1)))
         _set(params, "log_every_batches", self.log_every_batches)
@@ -352,6 +394,9 @@ class Trainer:
             persistent_workers=self.persistent_workers,
             prefetch_factor=self.prefetch_factor,
             resolution_mode=str(_get(params, "resolution_mode", "5p625")),
+            # Derived, never hand-set: hpx32 -> "healpix" makes the loader read
+            # [T, C, npix] files. Every lat-lon mode resolves to "latlon".
+            grid_kind=_grid_kind(_get(params, "resolution_mode", "5p625")),
             expected_grid_shape=_get(params, "expected_grid_shape", _get(params, "grid_shape", None)),
             return_metadata=bool((_get(params, "extra_features", {}) or {}).get("enabled", False))
             if isinstance(_get(params, "extra_features", {}) or {}, dict)
@@ -397,12 +442,13 @@ class Trainer:
         params.N_out_channels = int(out_chans)
         if len(list(params.out_channels)) != int(out_chans):
             raise AssertionError(f"out_channels length {len(list(params.out_channels))} does not match target channels {out_chans}")
-        if int(out_chans) != 67:
-            raise AssertionError(f"Expected 67 output channels, got {out_chans}")
         if str(_get(params, "normalization", "zscore")).lower() == "zscore":
             state_mean, state_std = self.train_dataset.output_normalization_vectors()
-            if state_mean.shape != (67,) or state_std.shape != (67,):
-                raise AssertionError(f"State normalization stats must have shape [67], got {state_mean.shape}/{state_std.shape}")
+            if state_mean.shape != (int(out_chans),) or state_std.shape != (int(out_chans),):
+                raise AssertionError(
+                    f"State normalization stats must have shape [{int(out_chans)}], "
+                    f"got {state_mean.shape}/{state_std.shape}"
+                )
         else:
             state_mean = None
             state_std = None
@@ -453,6 +499,8 @@ class Trainer:
             heads=int(_get(params, "num_heads", 4)),
             k_neighbors=int(_get(params, "k_neighbors", 8)),
             level_k_neighbors=_get(params, "level_k_neighbors", None),
+            level_dims=_get(params, "level_dims", None),
+            level_heads=_get(params, "level_heads", None),
             encoder_blocks=int(_get(params, "encoder_blocks", 1)),
             decoder_blocks=int(_get(params, "decoder_blocks", 1)),
             l0_blocks=int(_get(params, "l0_blocks", 2)),
@@ -495,6 +543,12 @@ class Trainer:
         )
         self.enable_amp = self.amp_enabled
         self.gscaler = amp.GradScaler("cuda", enabled=True) if self.scaler_enabled else None
+        if self.world_size > 1 and self.gscaler is not None:
+            raise ValueError(
+                "Multi-GPU training requires bf16 autocast: the fp16 GradScaler's inf-skip "
+                "decisions are per-rank and can diverge, silently desynchronizing the replicas. "
+                "Use amp_dtype auto_bf16_fp16 on bf16-capable GPUs (the default) or disable AMP."
+            )
         self.resolved_amp_dtype_name = _amp_dtype_name(self.amp_dtype)
 
         if str(getattr(self.graph, "graph_mode", "grid")) == "mesh":
@@ -502,6 +556,12 @@ class Trainer:
                 int(self.graph.grid_height),
                 int(self.graph.grid_width),
             )[:, 0]
+        elif _grid_kind(_get(params, "resolution_mode", "5p625")) == "healpix":
+            # HEALPix pixels are equal-area, so the area weighting is already in the
+            # pixelization. Feeding real latitudes here would apply cos(lat) on top
+            # and double-weight the tropics. cos(0) = 1 => uniform weights, and
+            # LatitudeWeightedMSE renormalizes by the mean anyway.
+            l0_lat = torch.zeros(int(self.graph.L0.num_nodes), dtype=torch.float32)
         else:
             l0_lat = self.graph.L0.lat_lon[:, 0].reshape(self.graph.L0.height, self.graph.L0.width)[:, 0]
         self.loss_channel_weight_cfg = dict(_get(params, "loss_channel_weighting", {}) or {})
@@ -579,6 +639,41 @@ class Trainer:
         # state_dict keys to processor._orig_mod.*, which would not match a stored
         # checkpoint. Saving goes back through _canonical_model_state() so written
         # checkpoints stay in the uncompiled key format either way.
+        if self.world_size > 1:
+            # Replicas must start bit-identical: broadcast rank 0's weights and
+            # buffers (covers fresh init, resume, and warm-start alike). Done
+            # BEFORE compile; state_dict tensors are the live storages.
+            # The process group is bound to cuda:{local_rank}; every collective
+            # must use tensors on exactly that device. self.device is resolved
+            # independently (and can legitimately differ, e.g. auto-fallback),
+            # so stage through the BOUND device, not self.device. print() not
+            # logging: non-zero ranks have logging silenced.
+            bound = torch.device("cuda", self.local_rank)
+            if self.device != bound:
+                print(f"[ddp rank {self.world_rank}] NOTE self.device={self.device} "
+                      f"!= bound device {bound}", flush=True)
+            with torch.no_grad():
+                for key, tensor in self.model.state_dict().items():
+                    if not (torch.is_tensor(tensor) and tensor.is_cuda):
+                        continue
+                    if tensor.device == bound and tensor.is_contiguous():
+                        dist.broadcast(tensor, src=0)
+                        continue
+                    print(f"[ddp rank {self.world_rank}] staging {key}: on {tensor.device}, "
+                          f"bound {bound}, contiguous={tensor.is_contiguous()}", flush=True)
+                    staged = tensor.detach().to(bound).contiguous()
+                    dist.broadcast(staged, src=0)
+                    tensor.copy_(staged)
+            # CRITICAL: force every enqueued collective to COMPLETE before
+            # returning. dist.broadcast only enqueues on a stream; the first
+            # DataLoader iteration then fork()s num_workers processes per rank,
+            # and forking while NCCL collectives are in flight wedges NCCL's
+            # progress threads -- observed as a 10-minute watchdog SIGABRT on
+            # "BROADCAST SeqNum=11" with training frozen from the exact second
+            # the workers spawned.
+            torch.cuda.synchronize()
+            dist.barrier()
+            logging.info("Broadcast model state from rank 0 to %d ranks (synchronized).", self.world_size)
         self._maybe_compile_model()
 
         logging.info("Number of trainable model parameters: %d", self.num_parameters)
@@ -714,6 +809,24 @@ class Trainer:
         self.spectral_loss_apply_latitude_weight = bool(raw.get("apply_latitude_weight", True))
         self.spectral_loss_space = str(raw.get("space", "normalized")).strip().lower()
         self.spectral_loss_allow_tisr = bool(raw.get("allow_tisr", False))
+        # mode: 'error_low_k' is the original low-frequency ERROR-power penalty
+        # (drift control; blind to blur). 'power_match' compares the band POWER
+        # of prediction and target separately (phase-blind), which is the form
+        # that penalizes blur instead of rewarding it.
+        self.spectral_loss_mode = str(raw.get("mode", "error_low_k")).strip().lower()
+        raw_band_weights = raw.get("band_weights", {"low_k": 0.0, "mid_k": 1.0, "high_k": 1.0})
+        if isinstance(raw_band_weights, dict):
+            unknown = set(raw_band_weights) - {"low_k", "mid_k", "high_k"}
+            if unknown:
+                raise ValueError(f"spectral_loss.band_weights has unknown keys: {sorted(unknown)}")
+            band_weights = [
+                float(raw_band_weights.get("low_k", 0.0)),
+                float(raw_band_weights.get("mid_k", 0.0)),
+                float(raw_band_weights.get("high_k", 0.0)),
+            ]
+        else:
+            band_weights = [float(value) for value in list(raw_band_weights)]
+        self.spectral_loss_band_weights = band_weights
 
         if not enabled:
             self.spectral_loss_metadata = {"enabled": False}
@@ -722,6 +835,17 @@ class Trainer:
             raise ValueError("spectral_loss.weight must be non-negative.")
         if self.spectral_loss_space != "normalized":
             raise ValueError("Only spectral_loss.space='normalized' is supported for this first diagnostic.")
+        if self.spectral_loss_mode not in {"error_low_k", "power_match"}:
+            raise ValueError(
+                f"Unsupported spectral_loss.mode={self.spectral_loss_mode!r}; "
+                "expected 'error_low_k' or 'power_match'."
+            )
+        if self.spectral_loss_mode == "power_match":
+            if not band_weights or any(value < 0.0 for value in band_weights) or sum(band_weights) <= 0.0:
+                raise ValueError(
+                    "spectral_loss.band_weights must be non-negative with a positive sum "
+                    "when mode='power_match'."
+                )
         variables = raw.get("variables", [])
         if isinstance(variables, str):
             variables = [chunk.strip() for chunk in variables.replace(",", " ").split() if chunk.strip()]
@@ -763,10 +887,12 @@ class Trainer:
         self.spectral_loss_channel_indices = torch.as_tensor(resolved_indices, device=self.device, dtype=torch.long)
         self.spectral_loss_metadata = {
             "enabled": True,
+            "mode": self.spectral_loss_mode,
             "weight": self.spectral_loss_weight,
             "variables": resolved_variables,
             "lat_cutoff": self.spectral_loss_lat_cutoff,
             "lon_cutoff": self.spectral_loss_lon_cutoff,
+            "band_weights": list(self.spectral_loss_band_weights),
             "include_dc": self.spectral_loss_include_dc,
             "apply_latitude_weight": self.spectral_loss_apply_latitude_weight,
             "space": self.spectral_loss_space,
@@ -781,10 +907,13 @@ class Trainer:
         logging.info("  enabled: %s", str(bool(meta.get("enabled", False))).lower())
         if not bool(meta.get("enabled", False)):
             return
+        logging.info("  mode: %s", meta.get("mode", "error_low_k"))
         logging.info("  weight: %.6g", float(meta.get("weight", 0.0)))
         logging.info("  variables:")
         for item in meta.get("variables", []):
             logging.info("    %-5s -> channel %s", item.get("canonical", item.get("requested")), item.get("channel"))
+        if meta.get("mode", "error_low_k") == "power_match":
+            logging.info("  band_weights (low/mid/high): %s", meta.get("band_weights"))
         logging.info("  lat_cutoff: %d", int(meta.get("lat_cutoff", 0)))
         logging.info("  lon_cutoff: %d", int(meta.get("lon_cutoff", 0)))
         logging.info("  include_dc: %s", str(bool(meta.get("include_dc", True))).lower())
@@ -846,7 +975,9 @@ class Trainer:
         sampled = random.randint(lo, hi) if self.world_rank == 0 else lo
         dist = getattr(torch, "distributed", None)
         if dist is not None and dist.is_available() and dist.is_initialized():
-            device = self.device if self.device.type == "cuda" else torch.device("cpu")
+            # Collectives must run on the PG's bound device (cuda:{local_rank}),
+            # which is not necessarily self.device.
+            device = torch.device("cuda", self.local_rank) if self.device.type == "cuda" else torch.device("cpu")
             tensor = torch.tensor([sampled], device=device, dtype=torch.long)
             dist.broadcast(tensor, src=0)
             sampled = int(tensor.item())
@@ -1102,6 +1233,8 @@ class Trainer:
         return {}
 
     def _init_wandb_run(self) -> Any:
+        if self.world_rank != 0:
+            return None
         cfg = self._wandb_config()
         if not bool(cfg.get("enabled", False)):
             return None
@@ -1759,6 +1892,17 @@ class Trainer:
         self.train_data_loader, self.train_dataset = self._build_train_loader(target_rollout_steps)
 
     def _prepare_delta_normalization_stats(self, output_channels: int) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        # Shared-file build: rank 0 computes and writes; other ranks wait at the
+        # barrier, then find the file on disk and simply load it.
+        if self.world_size > 1 and self.world_rank != 0:
+            dist.barrier()
+        try:
+            return self._prepare_delta_normalization_stats_impl(output_channels)
+        finally:
+            if self.world_size > 1 and self.world_rank == 0:
+                dist.barrier()
+
+    def _prepare_delta_normalization_stats_impl(self, output_channels: int) -> tuple[torch.Tensor | None, torch.Tensor | None]:
         if not self.use_delta_normalization:
             logging.info("Delta normalization: disabled")
             return None, None
@@ -1803,8 +1947,11 @@ class Trainer:
             output_channels=int(output_channels),
             eps=self.delta_norm_eps,
         )
-        if tuple(delta_mean.shape) != (67,) or tuple(delta_std.shape) != (67,):
-            raise AssertionError(f"Delta stats must have shape [67], got {tuple(delta_mean.shape)}/{tuple(delta_std.shape)}")
+        if tuple(delta_mean.shape) != (int(output_channels),) or tuple(delta_std.shape) != (int(output_channels),):
+            raise AssertionError(
+                f"Delta stats must have shape [{int(output_channels)}], "
+                f"got {tuple(delta_mean.shape)}/{tuple(delta_std.shape)}"
+            )
         logging.info("Delta normalization: enabled")
         logging.info("Delta stats path: %s", self.delta_stats_path)
         logging.info(
@@ -1915,9 +2062,13 @@ class Trainer:
         )
 
     def _ensure_mesh_graph(self, graph_path: str, mesh_cfg: dict) -> dict[str, Any]:
-        """Build/validate an icosphere mesh bundle (mesh_encoder mode). Uses the
-        training data's own lat/lon axes so grid<->mesh edges align with the grid
-        nodes the GridNodeAdapter produces (row-major over lat, lon)."""
+        """Build/validate a mesh bundle (mesh_encoder mode). Uses the training
+        data's own lat/lon axes so grid<->mesh edges align with the grid nodes the
+        GridNodeAdapter produces (row-major over lat, lon).
+
+        ``mesh_encoder.mesh_type`` selects the mesh geometry: "icosphere" (default,
+        unchanged) or "healpix", where the grid<->mesh boundary is a fixed
+        conservative regrid instead of barycentric interpolation."""
         from .mesh_builder import (
             bipartite_edge_feature_set,
             bipartite_mapping_type,
@@ -1925,6 +2076,14 @@ class Trainer:
             expected_mesh_metadata,
             validate_mesh_cache_metadata,
         )
+
+        mesh_type = str(mesh_cfg.get("mesh_type", "icosphere")).strip().lower()
+        if mesh_type not in {"icosphere", "healpix"}:
+            raise ValueError(
+                f"mesh_encoder.mesh_type must be 'icosphere' or 'healpix', got {mesh_type!r}."
+            )
+        if mesh_type == "healpix":
+            return self._ensure_healpix_mesh_graph(graph_path, mesh_cfg)
 
         num_graph_levels = int(_get(self.params, "num_graph_levels", 4))
         latitudes, longitudes = lat_lon_from_netcdf(self.params.train_data_path)
@@ -2014,7 +2173,114 @@ class Trainer:
         logging.info("Built icosphere mesh bundle at %s: %s", graph_path, meta)
         return dict(meta)
 
+    def _ensure_healpix_mesh_graph(self, graph_path: str, mesh_cfg: dict) -> dict[str, Any]:
+        """Build/validate a HEALPix mesh bundle (in-model conservative regrid).
+
+        The data grid is still the training file's own lat-lon axes, so
+        resolution_mode, the delta statistics, the latitude-weighted loss and the
+        evaluator are all untouched -- the HEALPix round trip lives entirely
+        between grid2mesh and mesh2grid inside the model.
+        """
+        from .mesh_builder import (
+            bipartite_edge_feature_set,
+            build_and_save_healpix,
+            expected_healpix_mesh_metadata,
+            validate_mesh_cache_metadata,
+        )
+
+        boundary_type = str(mesh_cfg.get("boundary_type", "legacy")).strip().lower()
+        if boundary_type != "fixed_spherical":
+            raise ValueError(
+                "mesh_encoder.mesh_type='healpix' requires "
+                "boundary_type='fixed_spherical' (the conservative regrid is a fixed, "
+                f"parameter-free remap), got {boundary_type!r}."
+            )
+        num_graph_levels = int(_get(self.params, "num_graph_levels", 4))
+        nside = int(mesh_cfg.get("nside", 32))
+        oversample = int(mesh_cfg.get("regrid_oversample", 8))
+        latitudes, longitudes = lat_lon_from_netcdf(self.params.train_data_path)
+        lat = latitudes.detach().cpu().numpy() if hasattr(latitudes, "detach") else np.asarray(latitudes)
+        lon = longitudes.detach().cpu().numpy() if hasattr(longitudes, "detach") else np.asarray(longitudes)
+        lat = np.asarray(lat, dtype=np.float64)
+        lon = np.asarray(lon, dtype=np.float64)
+        lat_grid, lon_grid = np.meshgrid(lat, lon, indexing="ij")
+        grid_ll = np.deg2rad(np.stack([lat_grid.reshape(-1), lon_grid.reshape(-1)], axis=1)).astype(np.float32)
+        grid_shape = (int(lat.shape[0]), int(lon.shape[0]))
+        resolution_mode = _get(self.params, "resolution_mode", None)
+        bipartite_features = bipartite_edge_feature_set(boundary_type)
+        # The resolved config already reconciled this with the mesh degree
+        # (architecture.py): 8 keeps true adjacency, more densifies via kNN.
+        level_k = _get(self.params, "level_k_neighbors", None)
+        # Grid message passing before/after the conservative regrid needs a kNN
+        # level over the lat-lon grid in the bundle. Same knobs the icosphere path
+        # uses, so a HEALPix and an icosphere run share one grid connectivity rule.
+        grid_attention_enabled = (
+            int(mesh_cfg.get("grid_attention_encoder_blocks", 0)) > 0
+            or int(mesh_cfg.get("grid_attention_decoder_blocks", 0)) > 0
+        )
+        grid_attention_k = (
+            int(mesh_cfg.get("grid_attention_k_neighbors", 8))
+            if grid_attention_enabled
+            else None
+        )
+        build_kwargs = dict(
+            nside=nside,
+            num_graph_levels=num_graph_levels,
+            grid_shape=grid_shape,
+            grid_lat_lon=grid_ll,
+            resolution_mode=None if resolution_mode is None else str(resolution_mode),
+            regrid_oversample=oversample,
+            bipartite_edge_features=bipartite_features,
+            level_k_neighbors=None if level_k is None else [int(x) for x in level_k],
+            grid_attention_k_neighbors=grid_attention_k,
+            grid_attention_connectivity_strategy=str(
+                _get(self.params, "graph_connectivity_strategy", "hybrid_row_aware_knn")
+            ),
+            grid_attention_row_aware_knn=dict(
+                _get(self.params, "row_aware_knn", {}) or {}
+            ),
+        )
+        expected = expected_healpix_mesh_metadata(**build_kwargs)
+        if os.path.isfile(graph_path):
+            raw = load_raw_graph_bundle(graph_path, map_location="cpu")
+            mismatches = validate_mesh_cache_metadata(raw, expected)
+            if not mismatches:
+                return dict(raw.get("metadata", {}) or {})
+            logging.warning(
+                "Rebuilding mismatched HEALPix mesh bundle %s: %s",
+                graph_path,
+                "; ".join(mismatches),
+            )
+        if not bool(_get(self.params, "auto_build_graph", True)):
+            raise FileNotFoundError(
+                f"Matching mesh graph bundle not found and auto_build_graph disabled: {graph_path}"
+            )
+        # Read the raw param, NOT self.delta_stats_path: _ensure_graph() runs early
+        # in __init__, well before that attribute is assigned.
+        raw_delta_stats_path = _get(self.params, "delta_stats_path", None)
+        regrid_cache_dir = (
+            os.path.dirname(str(raw_delta_stats_path)) if raw_delta_stats_path else ""
+        ) or "data/stats"
+        meta = build_and_save_healpix(
+            graph_path,
+            regrid_cache_dir=regrid_cache_dir,
+            **build_kwargs,
+        )
+        logging.info("Built HEALPix mesh bundle at %s: %s", graph_path, meta)
+        return dict(meta)
+
     def _ensure_graph(self) -> dict[str, Any]:
+        # Shared-file build: rank 0 auto-builds the graph bundle; other ranks
+        # wait, then load the cache rank 0 wrote.
+        if self.world_size > 1 and self.world_rank != 0:
+            dist.barrier()
+        try:
+            return self._ensure_graph_impl()
+        finally:
+            if self.world_size > 1 and self.world_rank == 0:
+                dist.barrier()
+
+    def _ensure_graph_impl(self) -> dict[str, Any]:
         graph_path = self.params.graph_path
         mesh_cfg = dict(_get(self.params, "mesh_encoder", {}) or {})
         if bool(mesh_cfg.get("enabled", False)):
@@ -3119,6 +3385,15 @@ class Trainer:
     def _spectral_step_loss(self, pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
         if not bool(getattr(self, "spectral_loss_enabled", False)):
             return torch.zeros((), device=pred.device, dtype=torch.float32)
+        if str(getattr(self, "spectral_loss_mode", "error_low_k")) == "power_match":
+            return band_spectral_power_loss(
+                pred,
+                gt,
+                getattr(self, "spectral_loss_channel_indices"),
+                band_weights=getattr(self, "spectral_loss_band_weights", [0.0, 1.0, 1.0]),
+                weight_latitude=bool(getattr(self, "spectral_loss_apply_latitude_weight", True)),
+                latitudes_rad=getattr(self, "spectral_latitudes_rad", None),
+            )
         return low_frequency_spectral_loss(
             pred,
             gt,
@@ -3731,6 +4006,10 @@ class Trainer:
         self.model.train()
         rollout_steps = self._rollout_steps_for_epoch()
         self._ensure_train_loader_rollout(rollout_steps)
+        if self.world_size > 1:
+            sampler = getattr(self.train_data_loader, "sampler", None)
+            if hasattr(sampler, "set_epoch"):
+                sampler.set_epoch(int(self.epoch))
         random_rollout = self.rollout_mode == "random"
         scheduled_rollout = self.rollout_mode == "scheduled"
         variable_horizon_training = random_rollout or scheduled_rollout
@@ -4204,7 +4483,28 @@ class Trainer:
         logs.update(random_stats)
         return elapsed, logs
 
+    def _all_reduce_gradients(self) -> None:
+        """Average gradients across ranks (manual data parallelism).
+
+        The hot path calls ``model.forward_steps`` -- a bound method that
+        torch.compile replaces -- so DDP's forward-hook machinery would never
+        fire. At this model size (~5M params, ~20MB of grads) a single flat
+        all-reduce after backward costs ~1-2 ms on NVLink, so overlap buys
+        nothing and this stays wrapper-free: no state_dict prefixes, no
+        find_unused_parameters, no compile interception concerns.
+        """
+        grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+        if not grads:
+            return
+        flat = torch._utils._flatten_dense_tensors(grads)
+        dist.all_reduce(flat, op=dist.ReduceOp.SUM)
+        flat.div_(float(self.world_size))
+        for grad, synced in zip(grads, torch._utils._unflatten_dense_tensors(flat, grads)):
+            grad.copy_(synced)
+
     def _optimizer_step(self) -> None:
+        if self.world_size > 1:
+            self._all_reduce_gradients()
         diagnostics = getattr(self, "diagnostics_manager", None)
         diagnostics_enabled = bool(getattr(diagnostics, "enabled", False))
         self._last_grad_norm_pre_clip = None
@@ -4298,6 +4598,8 @@ class Trainer:
         lr: float,
         epoch_time_sec: float,
     ) -> None:
+        if self.world_rank != 0:
+            return
         experiment_dir = str(_get(self.params, "experiment_dir", ""))
         if not experiment_dir:
             return
@@ -4800,6 +5102,8 @@ class Trainer:
         return time.time() - start, logs
 
     def save_checkpoint(self, checkpoint_path: str, metadata: dict[str, Any] | None = None) -> None:
+        if self.world_rank != 0:
+            return
         os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
         metadata = dict(self._last_epoch_metadata if metadata is None else metadata)
         metadata.update(self.graph_topology_metadata)
